@@ -1,0 +1,40 @@
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration {
+    public function up(): void
+    {
+        Schema::create('usulan_fisik_psu', function (Blueprint $table) {
+            $table->uuid('uuid')->primary();
+            $table->string('tipeUsulan');
+            $table->string('jenisUsulan');
+            $table->string('jenisPengusul');
+            $table->string('namaPemohon');
+            $table->string('nikPemohon');
+            $table->string('noKontak');
+            $table->string('emailPemohon');
+            $table->string('instansiPemohon');
+            $table->date('tglPermohonan');
+            $table->string('alamatPemohon');
+            $table->uuid('idPerumahan');
+
+            // UUID file pendukung
+            $table->uuid('salinanSertifikatHAT');
+            $table->uuid('ktpPemohon');
+            $table->uuid('suratHibahDesa');
+            $table->uuid('suratWakafDepag');
+            $table->uuid('dokumentasi');
+
+            $table->tinyInteger('status')->default(1); // 1 = usulan
+            $table->timestamps();
+        });
+    }
+
+    public function down(): void
+    {
+        Schema::dropIfExists('usulan_fisik_psu');
+    }
+};

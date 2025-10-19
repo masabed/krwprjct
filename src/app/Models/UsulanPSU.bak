@@ -1,0 +1,31 @@
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Model;
+
+
+class UsulanPSU extends Model
+{
+    use HasFactory;
+    public $incrementing = false;
+    protected $keyType = 'string';
+    protected $table = 'usulan_psu';
+    protected $fillable = [
+        'uuid', 'tipePengaju', 'namaPemohon', 'nikPemohon', 'pengelola',
+        'noKontak', 'emailPemohon', 'tglPermohonan', 'alamatPemohon',
+        'jenisPenyerahan', 'jenisPSU', 'luasSiteplan', 'status','perumahanId','rencanaSiteplan','salinanSertifikat','persetujuanBangunan','ktpPemohon','formPSU','suratPelapasan',
+    ];
+
+    public function uploads()
+{
+    return $this->hasMany(PSUUpload::class, 'usulan_psu_uuid', 'uuid');
+}
+
+
+   public function perumahan()
+    {
+        return $this->belongsTo(\App\Models\PerumahanDb::class, 'perumahanId', 'id');
+    }
+}

@@ -1,0 +1,49 @@
+<?php
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+
+class UsulanFisikPSU extends Model
+{
+    use HasFactory;
+
+    protected $table = 'usulan_fisik_psu';
+    protected $primaryKey = 'uuid';
+    public $incrementing = false;
+    protected $keyType = 'string';
+    public $timestamps = true;
+
+    protected $fillable = [
+        'uuid',
+        'tipeUsulan',
+        'jenisUsulan',
+        'jenisPengusul',
+        'namaPemohon',
+        'nikPemohon',
+        'noKontak',
+        'emailPemohon',
+        'instansiPemohon',
+        'tglPermohonan',
+        'alamatPemohon',
+        'idPerumahan',
+        'salinanSertifikatHAT',
+        'ktpPemohon',
+        'suratHibahDesa',
+        'suratWakafDepag',
+        'dokumentasi',
+        'status',
+    ];
+
+    // Relasi ke tabel perumahan
+    public function perumahan()
+    {
+        return $this->belongsTo(\App\Models\PerumahanDb::class, 'idPerumahan', 'id');
+    }
+
+    // Relasi ke usulan PSU lain (kalau memang ada kebutuhan)
+    public function usulan()
+    {
+        return $this->belongsTo(UsulanFisikPSU::class, 'usulan_psu_uuid', 'uuid');
+    }
+}

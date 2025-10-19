@@ -1,0 +1,281 @@
+<?php
+
+namespace App\Http\Controllers\Api\Sanpam;
+
+use App\Http\Controllers\Controller;
+use App\Models\UsulanPerumahan; // <-- Buat model & migration tabel ini dg kolom sesuai CSV
+use App\Models\SAPDUpload;
+use App\Models\SAPDUploadTemp;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
+
+class RutilahuController extends Controller
+{
+    /**
+     * Upload file ke TEMP (default disk) → return UUID
+     */
+    public function upload(Request $request)
+    {
+        $request->validate([
+            'file' => 'required|file|mimes:pdf,jpg,jpeg,png|max:4096',
+        ]);
+
+        $path = $request->file('file')->store('sapd_temp');
+
+        $temp = SAPDUploadTemp::create([
+            'uuid'     => Str::uuid(),
+            'user_id'  => auth()->id(),
+            'file_path'=> $path,
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'uuid'    => (string) $temp->uuid,
+                'user_id' => $temp->user_id,
+            ],
+        ]);
+    }
+
+    /**
+     * Submit data sesuai parameter CSV + finalize semua file foto dari TEMP → FINAL
+     */
+    public function submit(Request $request)
+    {
+        $user = auth()->user();
+
+        // === VALIDASI SESUAI CSV ===
+        $request->validate([
+            // Required (CSV: "requirment")
+            'kecamatan'                => 'required|string|max:150',
+            'kelurahan'                => 'required|string|max:150',
+            'nama_CPCL'                => 'required|string|max:255',
+            'nomorNIK'                 => 'required|string|max:30',
+            'nomorKK'                  => 'required|string|max:30',
+            'jumlahKeluarga'           => 'required|string|max:10',
+            'alamat'                   => 'required|string|max:500',
+            'umur'                     => 'required|string|max:10',
+            'luasTanah'                => 'required|string|max:100',
+            'luasBangunan'             => 'required|string|max:100',
+            'pendidikanTerakhir'       => 'required|string|max:100',
+            'pekerjaan'                => 'required|string|max:100',
+            'besaranPenghasilan'        => 'required|string|max:50',   // <- sesuai CSV (tanpa "n")
+            'statusKepemilikanRumah'   => 'required|string|max:50',
+            'asetRumahLain'            => 'required|string|max:100',
+            'asetTanahLain'            => 'required|string|max:100',
+            'sumberPenerangan'         => 'required|string|max:100',
+            'bantuanPerumahan'         => 'required|string|max:100',
+            'jenisKawasan'             => 'required|string|max:100',
+
+            // Foto (semua "requirment" di CSV) → UUID wajib
+            'fotoKTP'                  => 'required|uuid',
+            'fotoSuratTanah'           => 'required|uuid',
+            'fotoTampakDepan'          => 'required|uuid',
+            'fotoTampakKanan'          => 'required|uuid',
+            'fotoTampakKiri'           => 'required|uuid',
+            'fotoTampakBelakang'       => 'required|uuid',
+
+            // Nullable (CSV: "nullable")
+            'dokumentasiSurvey'        => 'nullable|string|max:1000',
+
+            // Komponen struktur (CSV: "requirment")
+            'pondasi'                  => 'required|string|max:100',
+            'sloof'                    => 'required|string|max:100',
+            'kolom'                    => 'required|string|max:100',
+            'ringBalok'                => 'required|string|max:100',
+            'rangkaAtap'               => 'required|string|max:100',
+            'dinding'                  => 'required|string|max:100',
+            'lantai'                   => 'required|string|max:100',
+            'penutupAtap'              => 'required|string|max:100',
+            'aksesAirMinum'            => 'required|string|max:100',
+            'aksesAirSanitasi'         => 'required|string|max:100',
+
+            // CSV: "integer 0-4, default 0"
+            'statusVerifikasi'         => 'nullable|integer|in:0,1,2,3,4',
+        ]);
+
+        // === Buat UUID record utama ===
+        $uuid = (string) Str::uuid();
+
+        // === Default statusVerifikasi jika tidak diisi ===
+        $statusVerifikasi = $request->filled('statusVerifikasi') ? (int)$request->statusVerifikasi : 0;
+
+        // === Simpan record utama (kolom sesuai CSV) ===
+        $row = UsulanPerumahanCSV::create([
+            'uuid'                   => $uuid,
+            'kecamatan'              => $request->kecamatan,
+            'kelurahan'              => $request->kelurahan,
+            'nama_CPCL'              => $request->nama_CPCL,
+            'nomorNIK'               => $request->nomorNIK,
+            'nomorKK'                => $request->nomorKK,
+            'jumlahKeluarga'         => $request->jumlahKeluarga,
+            'alamat'                 => $request->alamat,
+            'umur'                   => $request->umur,
+            'luasTanah'              => $request->luasTanah,
+            'luasBangunan'           => $request->luasBangunan,
+            'pendidikanTerakhir'     => $request->pendidikanTerakhir,
+            'pekerjaan'              => $request->pekerjaan,
+            'besaranPenghasilan'      => $request->besaranPenghasilan, 
+            'statusKepemilikanRumah' => $request->statusKepemilikanRumah,
+            'asetRumahLain'          => $request->asetRumahLain,
+            'asetTanahLain'          => $request->asetTanahLain,
+            'sumberPenerangan'       => $request->sumberPenerangan,
+            'bantuanPerumahan'       => $request->bantuanPerumahan,
+            'jenisKawasan'           => $request->jenisKawasan,
+
+            'dokumentasiSurvey'      => $request->dokumentasiSurvey,
+
+            'pondasi'                => $request->pondasi,
+            'sloof'                  => $request->sloof,
+            'kolom'                  => $request->kolom,
+            'ringBalok'              => $request->ringBalok,
+            'rangkaAtap'             => $request->rangkaAtap,
+            'dinding'                => $request->dinding,
+            'lantai'                 => $request->lantai,
+            'penutupAtap'            => $request->penutupAtap,
+            'aksesAirMinum'          => $request->aksesAirMinum,
+            'aksesAirSanitasi'       => $request->aksesAirSanitasi,
+
+            'statusVerifikasi'       => $statusVerifikasi,
+
+            // simpan UUID file (akan kita finalize di bawah)
+            'fotoKTP'                => $request->fotoKTP,
+            'fotoSuratTanah'         => $request->fotoSuratTanah,
+            'fotoTampakDepan'        => $request->fotoTampakDepan,
+            'fotoTampakKanan'        => $request->fotoTampakKanan,
+            'fotoTampakKiri'         => $request->fotoTampakKiri,
+            'fotoTampakBelakang'     => $request->fotoTampakBelakang,
+        ]);
+
+        // === Finalize semua file foto dari TEMP → FINAL ===
+        $fileUuids = [
+            $request->fotoKTP,
+            $request->fotoSuratTanah,
+            $request->fotoTampakDepan,
+            $request->fotoTampakKanan,
+            $request->fotoTampakKiri,
+            $request->fotoTampakBelakang,
+        ];
+
+        $temps = SAPDUploadTemp::whereIn('uuid', $fileUuids)
+            ->where('user_id', $user->id)
+            ->get();
+
+        foreach ($temps as $file) {
+            $oldPath  = $file->file_path;              // sapd_temp/xxx.ext
+            $filename = basename($oldPath);
+            $newPath  = 'sapd_final/' . $filename;
+
+            if (Storage::exists($oldPath)) {
+                Storage::move($oldPath, $newPath);
+            }
+
+            if (!SAPDUpload::where('uuid', $file->uuid)->exists()) {
+                SAPDUpload::create([
+                    'uuid'      => $file->uuid,
+                    'user_id'   => $user->id,
+                    'file_path' => $newPath,
+                ]);
+            }
+
+            SAPDUploadTemp::where('uuid', $file->uuid)->delete();
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Usulan Perumahan (CSV) berhasil disimpan',
+            'uuid'    => $uuid,
+        ]);
+    }
+
+    /**
+     * List data (latest first)
+     */
+    public function index()
+    {
+        $list = UsulanPerumahanCSV::latest()->get()->map(function ($item) {
+            return [
+                'uuid'                   => $item->uuid,
+                'kecamatan'              => $item->kecamatan,
+                'kelurahan'              => $item->kelurahan,
+                'nama_CPCL'              => $item->nama_CPCL,
+                'nomorNIK'               => $item->nomorNIK,
+                'nomorKK'                => $item->nomorKK,
+                'jumlahKeluarga'         => $item->jumlahKeluarga,
+                'alamat'                 => $item->alamat,
+                'umur'                   => $item->umur,
+                'luasTanah'              => $item->luasTanah,
+                'luasBangunan'           => $item->luasBangunan,
+                'pendidikanTerakhir'     => $item->pendidikanTerakhir,
+                'pekerjaan'              => $item->pekerjaan,
+                'besaranPenghasilan'      => $item->besaranPenghasilan,
+                'statusKepemilikanRumah' => $item->statusKepemilikanRumah,
+                'asetRumahLain'          => $item->asetRumahLain,
+                'asetTanahLain'          => $item->asetTanahLain,
+                'sumberPenerangan'       => $item->sumberPenerangan,
+                'bantuanPerumahan'       => $item->bantuanPerumahan,
+                'jenisKawasan'           => $item->jenisKawasan,
+
+                'pondasi'                => $item->pondasi,
+                'sloof'                  => $item->sloof,
+                'kolom'                  => $item->kolom,
+                'ringBalok'              => $item->ringBalok,
+                'rangkaAtap'             => $item->rangkaAtap,
+                'dinding'                => $item->dinding,
+                'lantai'                 => $item->lantai,
+                'penutupAtap'            => $item->penutupAtap,
+                'aksesAirMinum'          => $item->aksesAirMinum,
+                'aksesAirSanitasi'       => $item->aksesAirSanitasi,
+
+                'statusVerifikasi'       => (int) $item->statusVerifikasi,
+
+                // kembalikan UUID foto (FE bisa hit file controller utk stream)
+                'fotoKTP'                => $item->fotoKTP,
+                'fotoSuratTanah'         => $item->fotoSuratTanah,
+                'fotoTampakDepan'        => $item->fotoTampakDepan,
+                'fotoTampakKanan'        => $item->fotoTampakKanan,
+                'fotoTampakKiri'         => $item->fotoTampakKiri,
+                'fotoTampakBelakang'     => $item->fotoTampakBelakang,
+
+                'created_at'             => $item->created_at,
+            ];
+        });
+
+        return response()->json(['success' => true, 'data' => $list]);
+    }
+
+    /**
+     * Detail by UUID
+     */
+    public function show($uuid)
+    {
+        $item = UsulanPerumahanCSV::where('uuid', $uuid)->first();
+
+        if (!$item) {
+            return response()->json(['success' => false, 'message' => 'Data tidak ditemukan'], 404);
+        }
+
+        $fotoKTP          = SAPDUpload::where('uuid', $item->fotoKTP)->first();
+        $fotoSuratTanah   = SAPDUpload::where('uuid', $item->fotoSuratTanah)->first();
+        $fotoDepan        = SAPDUpload::where('uuid', $item->fotoTampakDepan)->first();
+        $fotoKanan        = SAPDUpload::where('uuid', $item->fotoTampakKanan)->first();
+        $fotoKiri         = SAPDUpload::where('uuid', $item->fotoTampakKiri)->first();
+        $fotoBelakang     = SAPDUpload::where('uuid', $item->fotoTampakBelakang)->first();
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'usulan' => $item,
+                'file_paths' => [
+                    'fotoKTP'            => $fotoKTP        ? '/storage/' . $fotoKTP->file_path : null,
+                    'fotoSuratTanah'     => $fotoSuratTanah ? '/storage/' . $fotoSuratTanah->file_path : null,
+                    'fotoTampakDepan'    => $fotoDepan      ? '/storage/' . $fotoDepan->file_path : null,
+                    'fotoTampakKanan'    => $fotoKanan      ? '/storage/' . $fotoKanan->file_path : null,
+                    'fotoTampakKiri'     => $fotoKiri       ? '/storage/' . $fotoKiri->file_path : null,
+                    'fotoTampakBelakang' => $fotoBelakang   ? '/storage/' . $fotoBelakang->file_path : null,
+                ],
+            ],
+        ]);
+    }
+}

@@ -1,0 +1,177 @@
+<?php
+
+namespace App\Http\Controllers\Api\Psu;
+
+use App\Models\UsulanFisikPSU;
+use App\Models\PSUUpload;
+use App\Models\PSUUploadTemp;
+use Illuminate\Support\Str;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
+use App\Http\Controllers\Controller;
+
+class ControllerPsuUsulanFisik extends Controller
+{
+    public function submit(Request $request)
+    {
+        $user = auth()->user();
+
+        $request->validate([
+            'tipeUsulan' => 'required',
+            'jenisUsulan' => 'required',
+            'jenisPengusul' => 'required',
+            'namaPemohon' => 'required',
+            'nikPemohon' => 'required',
+            'noKontak' => 'required',
+            'emailPemohon' => 'required|email',
+            'instansiPemohon' => 'required',
+            'tglPermohonan' => 'required|date',
+            'alamatPemohon' => 'required',
+            'idPerumahan' => 'required',
+
+            // UUID file (wajib)
+            'salinanSertifikatHAT' => 'required|uuid',
+            'ktpPemohon' => 'required|uuid',
+            'suratHibahDesa' => 'required|uuid',
+            'suratWakafDepag' => 'required|uuid',
+            'dokumentasi' => 'required|uuid',
+        ]);
+
+        $uuid = Str::uuid();
+
+        $usulan = UsulanFisikPSU::create([
+            'uuid' => $uuid,
+            'tipeUsulan' => $request->tipeUsulan,
+            'jenisUsulan' => $request->jenisUsulan,
+            'jenisPengusul' => $request->jenisPengusul,
+            'namaPemohon' => $request->namaPemohon,
+            'nikPemohon' => $request->nikPemohon,
+            'noKontak' => $request->noKontak,
+            'emailPemohon' => $request->emailPemohon,
+            'instansiPemohon' => $request->instansiPemohon,
+            'tglPermohonan' => $request->tglPermohonan,
+            'alamatPemohon' => $request->alamatPemohon,
+            'idPerumahan' => $request->idPerumahan,
+            'salinanSertifikatHAT' => $request->salinanSertifikatHAT,
+            'ktpPemohon' => $request->ktpPemohon,
+            'suratHibahDesa' => $request->suratHibahDesa,
+            'suratWakafDepag' => $request->suratWakafDepag,
+            'dokumentasi' => $request->dokumentasi,
+            'status' => 1,
+        ]);
+
+        // UUID file yang akan diproses
+        $fileUuids = [
+            $request->salinanSertifikatHAT,
+            $request->ktpPemohon,
+            $request->suratHibahDesa,
+            $request->suratWakafDepag,
+            $request->dokumentasi,
+        ];
+
+        $files = PSUUploadTemp::whereIn('uuid', $fileUuids)
+            ->where('user_id', $user->id)
+            ->get();
+
+        foreach ($files as $file) {
+            $oldPath = $file->file_path;
+            $filename = basename($oldPath);
+            $newPath = 'psu_final/' . $filename;
+
+            if (Storage::exists($oldPath)) {
+                Storage::move($oldPath, $newPath);
+            }
+
+            // Hindari duplikat UUID
+            if (!PSUUpload::where('uuid', $file->uuid)->exists()) {
+                PSUUpload::create([
+                    'uuid' => $file->uuid,
+                    'user_id' => $user->id,
+                    'file_path' => $newPath,
+                ]);
+            }
+
+            // Hapus file dari temp setelah diproses
+            PSUUploadTemp::where('uuid', $file->uuid)->delete();
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Usulan fisik PSU berhasil disimpan',
+            'uuid' => $uuid,
+        ]);
+    }
+
+   public function index()
+{
+    $usulans = UsulanFisikPSU::with(['perumahan:id,namaPerumahan'])
+        ->latest()
+        ->get()
+        ->map(function ($item) {
+            return [
+                'uuid'               => $item->uuid,
+                'tipeUsulan'         => $item->tipeUsulan,
+                'jenisUsulan'        => $item->jenisUsulan,
+                'jenisPengusul'      => $item->jenisPengusul,
+                'namaPemohon'        => $item->namaPemohon,
+                'nikPemohon'         => $item->nikPemohon,
+                'noKontak'           => $item->noKontak,
+                'emailPemohon'       => $item->emailPemohon,
+                'instansiPemohon'    => $item->instansiPemohon,
+                'tglPermohonan'      => $item->tglPermohonan,
+                'alamatPemohon'      => $item->alamatPemohon,
+                'idPerumahan'        => $item->idPerumahan,
+                'namaPerumahan'   => optional($item->perumahan)->namaPerumahan,
+                'salinanSertifikatHAT' => $item->salinanSertifikatHAT,
+                'ktpPemohon'         => $item->ktpPemohon,
+                'suratHibahDesa'     => $item->suratHibahDesa,
+                'suratWakafDepag'    => $item->suratWakafDepag,
+                'dokumentasi'        => $item->dokumentasi,
+                'status'             => $item->status,
+            ];
+        });
+
+    return response()->json([
+        'success' => true,
+        'data' => $usulans
+    ]);
+}
+
+    public function show($uuid)
+    {
+        $usulan = UsulanFisikPSU::where('uuid', $uuid)->first();
+
+        if (!$usulan) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Data tidak ditemukan',
+            ], 404);
+        }
+
+        // Daftar UUID file
+        $fileFields = [
+            'salinanSertifikatHAT',
+            'ktpPemohon',
+            'suratHibahDesa',
+            'suratWakafDepag',
+            'dokumentasi',
+        ];
+
+        $fileData = [];
+
+        foreach ($fileFields as $field) {
+            $fileUuid = $usulan->$field;
+            $file = PSUUpload::where('uuid', $fileUuid)->first();
+
+            $fileData[$field] = $file ? '/storage/' . $file->file_path : null;
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'usulan' => $usulan,
+                'file_paths' => $fileData
+            ]
+        ]);
+    }
+}

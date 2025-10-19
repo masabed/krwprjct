@@ -1,0 +1,49 @@
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    /**
+     * Run the migrations.
+     */
+    public function up(): void
+    {
+       Schema::create('usulan_psu', function (Blueprint $table) {
+    $table->uuid('uuid')->primary();
+    $table->string('tipePengaju');
+    $table->string('namaPemohon');
+    $table->string('nikPemohon');
+    $table->string('pengelola');
+    $table->string('noKontak');
+    $table->string('emailPemohon');
+    $table->date('tglPermohonan');
+    $table->string('alamatPemohon');
+    $table->string('perumahanId');
+    $table->string('jenisPenyerahan');
+    $table->text('jenisPSU'); // JSON string
+    $table->string('luasSiteplan');
+    $table->tinyInteger('status')->default(1); // 1: Usulan
+
+    // ✅ Tambahan kolom untuk UUID file
+    $table->uuid('rencanaSiteplan');
+    $table->uuid('salinanSertifikat');
+    $table->uuid('persetujuanBangunan');
+    $table->uuid('ktpPemohon');
+    $table->uuid('formPSU');
+    $table->uuid('suratPelapasan');
+
+    $table->timestamps();
+});
+    }
+
+    /**
+     * Reverse the migrations.
+     */
+    public function down(): void
+    {
+        Schema::dropIfExists('usulan_p_s_u_s');
+    }
+};

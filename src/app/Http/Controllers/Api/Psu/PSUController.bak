@@ -1,0 +1,214 @@
+<?php
+
+namespace App\Http\Controllers\Api\Psu;
+
+use App\Models\UsulanPSU;
+use App\Models\PSUUpload;
+use App\Models\PSUUploadTemp;
+use Illuminate\Support\Str;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
+use App\Http\Controllers\Controller;
+
+class PSUController extends Controller
+{
+    // Upload file ke temp
+    public function upload(Request $request)
+    {
+        $request->validate([
+            'file' => 'required|file|mimes:pdf|max:2048',
+        ]);
+
+        $path = $request->file('file')->store('psu_temp');
+
+        $temp = PSUUploadTemp::create([
+            'uuid' => Str::uuid(),
+            'user_id' => auth()->id(),
+            'file_path' => $path,
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'uuid' => $temp->uuid,
+                'user_id' => $temp->user_id,
+            ],
+        ]);
+    }
+
+    public function submit(Request $request)
+    {
+        $user = auth()->user();
+
+        $request->validate([
+            'tipePengaju' => 'required',
+            'namaPemohon' => 'required',
+            'nikPemohon' => 'required',
+            'pengelola' => 'required',
+            'noKontak' => 'required',
+            'emailPemohon' => 'required|email',
+            'tglPermohonan' => 'required|date',
+            'alamatPemohon' => 'required',
+            'jenisPenyerahan' => 'required',
+            'jenisPSU' => 'required|array|min:1',
+            'luasSiteplan' => 'required',
+            'perumahanId' => 'required',
+
+            // UUID file wajib:
+            'rencanaSiteplan' => 'required|uuid',
+            'salinanSertifikat' => 'required|uuid',
+            'persetujuanBangunan' => 'required|uuid',
+            'ktpPemohon' => 'required|uuid',
+            'formPSU' => 'required|uuid',
+            'suratPelapasan' => 'required|uuid',
+        ]);
+
+        // UUID baru untuk usulan
+        $uuid = Str::uuid();
+
+        // Simpan data usulan PSU
+        UsulanPSU::create([
+            'uuid' => $uuid,
+            'tipePengaju' => $request->tipePengaju,
+            'namaPemohon' => $request->namaPemohon,
+            'nikPemohon' => $request->nikPemohon,
+            'pengelola' => $request->pengelola,
+            'noKontak' => $request->noKontak,
+            'emailPemohon' => $request->emailPemohon,
+            'perumahanId' => $request->perumahanId,
+            'tglPermohonan' => $request->tglPermohonan,
+            'alamatPemohon' => $request->alamatPemohon,
+            'jenisPenyerahan' => $request->jenisPenyerahan,
+            'jenisPSU' => json_encode($request->jenisPSU),
+            'luasSiteplan' => $request->luasSiteplan,
+            'status' => 1,
+            'rencanaSiteplan' => $request->rencanaSiteplan,
+            'salinanSertifikat' => $request->salinanSertifikat,
+            'persetujuanBangunan' => $request->persetujuanBangunan,
+            'ktpPemohon' => $request->ktpPemohon,
+            'formPSU' => $request->formPSU,
+            'suratPelapasan' => $request->suratPelapasan,
+        ]);
+
+        // Ambil hanya UUID file yang dipakai di request
+        $fileUuids = [
+            $request->rencanaSiteplan,
+            $request->salinanSertifikat,
+            $request->persetujuanBangunan,
+            $request->ktpPemohon,
+            $request->formPSU,
+            $request->suratPelapasan,
+        ];
+
+        $uploadedFiles = PSUUploadTemp::whereIn('uuid', $fileUuids)
+            ->where('user_id', $user->id)
+            ->get();
+
+        foreach ($uploadedFiles as $file) {
+            $oldPath = $file->file_path;
+            $filename = basename($oldPath);
+            $newPath = 'psu_final/' . $filename;
+
+            // Pindahkan file kalau ada
+            if (Storage::exists($oldPath)) {
+                Storage::move($oldPath, $newPath);
+            }
+
+            // Simpan ke tabel final, jika belum pernah ada
+            if (!PSUUpload::where('uuid', $file->uuid)->exists()) {
+                PSUUpload::create([
+                    'uuid' => $file->uuid,
+                    'user_id' => $user->id,
+                    'file_path' => $newPath,
+                ]);
+            }
+        }
+
+        // Hapus hanya file yang sudah dipakai, bukan semuanya
+        PSUUploadTemp::whereIn('uuid', $fileUuids)->delete();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Usulan berhasil disimpan dan file dipindahkan',
+            'uuid' => $uuid,
+        ]);
+    }
+
+    // Ambil semua usulan
+  public function index()
+{
+    $usulans = UsulanPSU::with(['perumahan:id,namaPerumahan'])
+        ->latest()
+        ->get()
+        ->map(function ($item) {
+            return [
+                'uuid'            => $item->uuid,
+                'tipePengaju'     => $item->tipePengaju,
+                'namaPemohon'     => $item->namaPemohon,
+                'nikPemohon'      => $item->nikPemohon,
+                'pengelola'       => $item->pengelola,
+                'noKontak'        => $item->noKontak,
+                'emailPemohon'    => $item->emailPemohon,
+                'tglPermohonan'   => $item->tglPermohonan,//optional($item->tglPermohonan)->toDateString(),
+                'alamatPemohon'   => $item->alamatPemohon,
+                'jenisPenyerahan' => $item->jenisPenyerahan,
+                'jenisPSU'        => $item->jenisPSU,   // sudah cast array
+                'luasSiteplan'    => $item->luasSiteplan,
+                'status'          => $item->status,
+
+                'perumahanId'     => $item->perumahanId,                 // FK yang disimpan
+                'namaPerumahan'   => optional($item->perumahan)->namaPerumahan, // dari relasi
+            ];
+        });
+
+    return response()->json([
+        'success' => true,
+        'data' => $usulans
+    ]);
+
+
+    return response()->json([
+        'success' => true,
+        'data' => $usulans
+    ]);
+}
+
+
+    // Ambil satu data usulan
+    public function show($uuid)
+    {
+        $usulan = UsulanPSU::where('uuid', $uuid)->first();
+
+        if (!$usulan) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Data tidak ditemukan',
+            ], 404);
+        }
+
+        $fileFields = [
+            'rencanaSiteplan',
+            'salinanSertifikat',
+            'persetujuanBangunan',
+            'ktpPemohon',
+            'formPSU',
+            'suratPelapasan',
+        ];
+
+        $fileData = [];
+
+        foreach ($fileFields as $field) {
+            $fileUuid = $usulan->$field;
+            $file = PSUUpload::where('uuid', $fileUuid)->first();
+            $fileData[$field] = $file ? '/storage/' . $file->file_path : null;
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'usulan' => $usulan,
+                'file_paths' => $fileData
+            ]
+        ]);
+    }
+}

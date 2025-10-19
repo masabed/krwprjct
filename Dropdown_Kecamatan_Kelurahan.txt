@@ -1,0 +1,407 @@
+Data di view List yang muncul
+
+1. Nama CPCL
+2. Kegiatan
+3. Kecamatan
+4. Kelurahan
+5. Kontraktor Pelaksana
+
+
+Data Dropdown Kecamatan dan Kelurahan (Untuk Input / filter data)
+
+1. Klik Kecamatan Baru muncul kelurahan / desa di bawahnya:
+
+List Kecamtan dan Kelurahan
+
+1. Kecamatan Banyusari 
+Banyuasih
+Cicinde Selatan
+Cicinde Utara
+Gembongan
+Gempol
+Gempolkolot
+Jayamukti
+Kutaraharja
+Mekarasih
+Pamekaran
+Talunjaya
+Tanjung
+
+2. Kecamatan Batujaya
+
+Batujaya
+Baturaden
+Karyabakti
+Karyamakmur
+Karyamulya
+Kutaampel
+Segaran
+Segarjaya
+Telukambulu
+Telukbango
+
+3. Kecamatan Ciampel
+
+Kutamekar
+Kutanegara
+Kutapohaci
+Mulyasari
+Mulyasejati
+Parungmulya
+Tegalega
+
+4. Kecamatan Cibuaya
+
+Cemarajaya
+Cibuaya
+Gebangjaya
+Jayamulya
+Kalidungjaya
+Kedungjaya
+Kedungjeruk
+Kertarahayu
+Pejaten
+Sedari
+Sukasari
+
+5. Kecamatan Cikampek
+
+Cikampek Barat
+Cikampek Kota
+Cikampek Pusaka
+Cikampek Selatan
+Cikampek Timur
+Dawuan Barat
+Dawuan Tengah
+Dawuan Timur
+Kalihurip
+Kamojing
+
+6. Kecamatan Cilamaya Kulon
+	
+Bayur Kidul
+Bayur Lor
+Kiara
+Langensari
+Manggungjaya
+Muktijaya
+Pasirjaya
+Pasirukem
+Sukajaya
+Sukamulya
+Sumurgede
+Tegalurung
+
+7. Kecamatan Cilamaya Wetan
+
+Cikalong
+Cikarang
+Cilamaya
+Mekarmaya
+Muara
+Muarabaru
+Rawagempol Kulon
+Rawagempol Wetan
+Sukakerta
+Sukatani
+Tegalsari
+Tegalwaru
+
+8.Kecamatan Cilebar
+
+Cikande
+Ciptamargi
+Kertamukti
+Kosambibatu
+Mekarpohaci
+Pusakajaya Selatan
+Pusakajaya Utara
+Rawasari
+Sukaratu
+Tanjungsari
+
+9. Kecamatan Jatisari
+	
+Balonggandu
+Barugbug
+Cikalongsari
+Cirejag
+Jatibaru
+Jatiragas
+Jatisari
+Jatiwangi
+Kalijati
+Mekarsari
+Pacing
+Situdam
+Sukamekar
+Telarsari
+
+10. Kecamatan Jayakerta
+	
+Ciptamarga
+Jayakerta
+Jayamakmur
+Kampungsawah
+Kemiri
+Kertajaya
+Makmurjaya
+Medangasem
+
+11. Kecamatan Karawang Barat
+Adiarsa Barat
+Karangpawitan
+Karawang Kulon
+Mekarjati
+Nagasari
+Tanjungmekar
+Tanjungpura
+Tunggakjati
+
+12. Kecamatan Karawang Timur
+Kondangjaya
+Margasari
+Tegalsawah
+Adiarsa Timur
+Karawang Wetan
+Palumbonsari
+Plawad
+
+13.Kecamatan Klari
+
+Anggadita
+Belendung
+Cibalongsari
+Cimahi
+Curug
+Duren
+Gintungkerta
+Karanganyar
+Kiarapayung
+Klari
+Pancawati
+Sumurkondang
+Walahar
+
+14. Kecamatan Kotabaru
+
+Cikampek Utara
+Jomin Barat
+Jomin Timur
+Pangulah Baru
+Pangulah Selatan
+Pangulah Utara
+Pucung
+Sarimulya
+Wancimekar
+
+15. Kecamatan Kutawaluya
+
+Kutagandok
+Kutajaya
+Kutakarya
+Kutamukti
+Kutaraja
+Mulyajaya
+Sampalan
+Sindangkarya
+Sindangmukti
+Sindangmulya
+Sindangsar
+Waluya
+
+16. Kecamatan Lemahabang
+
+Ciwaringin
+Karangtanjung
+Karyamukti
+Kedawung
+Lemahabang
+Lemahmukti
+Pasirtanjung
+Pulojaya
+Pulokalapa
+Pulomulya
+Waringinkarya
+
+17. Kecamatan Majalaya
+Bengle
+Ciranggon
+Lemahmulya
+Majalaya
+Pasirjengkol
+Pasirmulya
+Sarijaya
+
+18. Kecamatan Pakisjaya
+Solokan
+Talagajaya
+Tanahbaru
+Tanjungbungin
+Tanjungmekar
+Tanjungpakis
+Telukbuyung
+Telukjaya
+
+19. Kecamatan Pangkalan
+
+Cintaasih
+Ciptasari
+Jatilaksana
+Kertasari
+Medalsari
+Mulangsari
+Tamanmekar
+Tamansari
+
+20.Kecamatan Pedes
+	
+Dongkal 
+Jatimulya
+Karangjaya
+Kedaljaya
+Kertamulya
+Kertaraharja
+Labanjay
+Malangsari
+Payungsari
+Puspasari
+Randumulya
+Sungaibuntu
+
+21.Kecamatan Purwasari
+	
+Cengkong
+Darawolong
+Karangsari
+Mekarjaya
+Purwasari
+Sukasari
+Tamelang
+Tegalsari
+
+22. Kecamatan Rawamerta
+
+Balongsari
+Cibadak
+Gombongsari
+Kutawargi
+Mekarjaya
+Panyingkiran
+Pasirawi
+Pasirkaliki
+Purwamekar
+Sekarwangi
+Sukamerta
+Sukapura
+Sukaraja
+
+23.	Rengasdengklok
+
+Amansari
+Dewisari
+Dukuhkarya
+Kalangsari
+Kalangsuria
+Karyasari
+Kertasari
+Rengasdengklok Selatan
+Rengasdengklok Utara
+
+24. Kecamatan Tegal Waru
+Cigunungsari
+Cintalaksana
+Cintalanggeng
+Cintawargi
+Cipurwasari
+Kutalanggeng
+Kutamaneuh
+Mekarbuana
+Wargasetra
+
+25. Kecamatan Telagasari
+
+Cadaskertajaya
+Cariumulya
+Cilewo
+Ciwulan
+Kalibuaya
+Kalijaya
+Kalisari
+Linggarsari
+Pasirkamuning
+Pasirmukti
+Pasirtalaga
+Pulosari
+Talagamulya
+Talagasari
+
+26. Kecamatan Telukjambe Barat
+
+Karangligar
+Karangmulya
+Margakaya
+Margamuly
+Mekarmulya
+Mulyajaya
+Parungsari
+Wanajaya
+Wanakerta
+Wanasari
+
+27. Kecamatan Telukjambe Timur
+	
+Pinayungan
+Purwadana
+Puseurjaya
+Sirnabaya
+Sukaharja
+Sukaluyu
+Sukamakmur
+Telukjambe
+Wadas
+
+28. Kecamatan Tempuran
+Cikuntul
+Ciparagejaya
+Dayeuh
+luhur
+Jayanagar
+Lemahduhur
+Lemahkarya
+Lemahmakmur
+Lemahsubur
+Pagadungan
+Pancakarya
+Purwajaya
+Sumberjaya
+Tanjungjaya
+Tempuran
+
+29. Kecamatan Tirtajaya
+
+	
+Bolang
+Gempolkarya
+Kutamakmur
+Medankarya
+Pisangsambo
+Sabajaya
+Srijaya
+Srikamulyan
+Sumurlaban
+Tambaksari
+Tambaksumur
+
+30.Kecamatan Tirtamulya
+
+Bojongsari
+Cipondoh
+Citarik
+Kamurang
+Karangjaya
+Karangsinom
+Kertawaluya
+Parakan
+Parakanmulya
+Tirtasari
