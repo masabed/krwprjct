@@ -19,7 +19,12 @@ use App\Http\Controllers\Api\Permukiman\PermukimanController;
 use App\Http\Controllers\Api\Permukiman\PermukimanFileController;
 use App\Http\Controllers\Api\Psu\PSUSerahTerimaController;
 use App\Http\Controllers\Api\Psu\PSUUsulanFisikBSLController;
+use App\Http\Controllers\Api\Psu\PSUUsulanFisikPerumahanController;
+use App\Http\Controllers\Api\Psu\PSUUsulanFisikPJLController;
+use App\Http\Controllers\Api\Psu\PSUUsulanFisikTPUController;
 use App\Http\Controllers\Api\getDataPribadi\MySubmissionsController;
+use App\Http\Controllers\Api\Perencanaan\PerencanaanController;
+
 
 
 
@@ -69,7 +74,7 @@ Route::middleware('auth:api')->group(function () {
 
 //DataSanpam Individual
  Route::post('/sanpam/upload', [SAPDIndividualController::class, 'upload']);
-    Route::post('/sanpam/individual/submit', [SAPDIndividualController::class, 'submit']);
+    Route::post('/sanpam/individual/create', [SAPDIndividualController::class, 'submit']);
     Route::get('/sanpam/individual', [SAPDIndividualController::class, 'index']);
     Route::post('/sanpam/individual/update/{uuid}', [SAPDIndividualController::class, 'update'])->whereUuid('uuid');
 Route::delete('/sanpam/individual/{uuid}', [SAPDIndividualController::class, 'destroy'])->whereUuid('uuid');
@@ -77,14 +82,14 @@ Route::delete('/sanpam/individual/{uuid}', [SAPDIndividualController::class, 'de
         ->whereUuid('uuid'); // ensure it's a valid UUID;
 
     //DataSanpam fasum
-    Route::post('/sanpam/fasum/submit', [SAPDFasilitasUmumController::class, 'submit']);
+    Route::post('/sanpam/fasum/create', [SAPDFasilitasUmumController::class, 'submit']);
     Route::get('/sanpam/fasum', [SAPDFasilitasUmumController::class, 'index']);
     Route::get('/sanpam/fasum/{uuid}', [SAPDFasilitasUmumController::class, 'show']);
     Route::post('/sanpam/fasum/update/{uuid}', [SAPDFasilitasUmumController::class, 'update'])->whereUuid('uuid');
     Route::delete('/sanpam/fasum/{uuid}', [SAPDFasilitasUmumController::class, 'destroy'])->whereUuid('uuid');
     
 //DataSanpam Lahan Masyarakat
-Route::post('/sanpam/sarana-air/submit', [SAPDLahanMasyarakatController::class, 'submit']);
+Route::post('/sanpam/sarana-air/create', [SAPDLahanMasyarakatController::class, 'submit']);
 Route::post('/sanpam/sarana-air/update/{uuid}', [SAPDLahanMasyarakatController::class, 'update']);
 Route::delete('/sanpam/sarana-air/{uuid}', [SAPDLahanMasyarakatController::class, 'destroy']);
 Route::get('/sanpam/sarana-air', [SAPDLahanMasyarakatController::class, 'index']);
@@ -105,12 +110,39 @@ Route::delete('/psu/serahterima/{uuid}', [PSUSerahTerimaController::class, 'dest
 // file show: tetap
 Route::get('/psu/file/{uuid}', [PSUFileController::class, 'show'])->name('psu.file.show');
 
-// PSU Usulan Fisik
+//Perencanaan
+Route::get('/perencanaan', [PerencanaanController::class, 'index']);
+Route::post('/perencanaan/create', [PerencanaanController::class, 'store']);
+Route::post('/perencanaan/update/{id}', [PerencanaanController::class, 'update']);
+Route::get('/perencanaan/{id}', [PerencanaanController::class, 'show']);
+
+// PSU Usulan Fisik BSL
 Route::post('/psu/usulan-fisik-bsl/create', [PSUUsulanFisikBSLController::class, 'store']);
 Route::get ('/psu/usulan-fisik-bsl',        [PSUUsulanFisikBSLController::class, 'index']);
 Route::get ('/psu/usulan-fisik-bsl/{uuid}', [PSUUsulanFisikBSLController::class, 'show']);
 Route::post ('/psu/usulan-fisik-bsl/edit/{uuid}', [PSUUsulanFisikBSLController::class, 'update']);
 Route::delete('/psu/usulan-fisik-bsl/{uuid}',[PSUUsulanFisikBSLController::class, 'destroy']);
+
+// PSU Usulan Fisik PJL
+Route::get ('/psu/usulan-fisik-pjl',              [PSUUsulanFisikPJLController::class, 'index']);
+Route::get ('/psu/usulan-fisik-pjl/{uuid}',       [PSUUsulanFisikPJLController::class, 'show']);
+Route::post('/psu/usulan-fisik-pjl/create',       [PSUUsulanFisikPJLController::class, 'store']);
+Route::post('/psu/usulan-fisik-pjl/update/{uuid}',[PSUUsulanFisikPJLController::class, 'update']);
+Route::delete('/psu/usulan-fisik-pjl/{uuid}',     [PSUUsulanFisikPJLController::class, 'destroy']);
+
+// PSU Usulan Fisik TPU
+Route::get ('/psu/usulan-fisik-tpu',            [PSUUsulanFisikTPUController::class, 'index']);
+Route::post('/psu/usulan-fisik-tpu/create',     [PSUUsulanFisikTPUController::class, 'store']);
+Route::get ('/psu/usulan-fisik-tpu/{uuid}',     [PSUUsulanFisikTPUController::class, 'show']);
+Route::post('/psu/usulan-fisik-tpu/update/{uuid}', [PSUUsulanFisikTPUController::class, 'update']); // atau PUT/PATCH
+Route::delete('/psu/usulan-fisik-tpu/{uuid}',   [PSUUsulanFisikTPUController::class, 'destroy']);
+
+// PSU Usulan Fisik Perumahan
+Route::get   ('/psu/usulan-fisik-perumahan',              [PSUUsulanFisikPerumahanController::class, 'index']);
+Route::post  ('/psu/usulan-fisik-perumahan/create',       [PSUUsulanFisikPerumahanController::class, 'store']);
+Route::get   ('/psu/usulan-fisik-perumahan/{uuid}',       [PSUUsulanFisikPerumahanController::class, 'show']);
+Route::post  ('/psu/usulan-fisik-perumahan/update/{uuid}',[PSUUsulanFisikPerumahanController::class, 'update']); // boleh PUT/PATCH
+Route::delete('/psu/usulan-fisik-perumahan/{uuid}',       [PSUUsulanFisikPerumahanController::class, 'destroy']);
 
     //dbPerumahan
     Route::post('/perumahan-db/create', [PerumahanDbController::class, 'store']);

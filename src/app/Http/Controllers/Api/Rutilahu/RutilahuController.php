@@ -9,6 +9,7 @@ use App\Models\RutilahuUploadTemp;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use App\Models\Perencanaan; 
 
 class RutilahuController extends Controller
 {
@@ -271,7 +272,7 @@ class RutilahuController extends Controller
         'dokumentasiSurvey.*'    => 'uuid',
 
         'dokumentasiSurvey_text' => 'sometimes|nullable|string|max:1000',
-        'statusVerifikasi'       => 'sometimes|integer|in:0,1,2,3,4',
+        'statusVerifikasi'       => 'sometimes|integer|in:0,1,2,3,4,5,6,7,8',
         'pesan_verifikasi'       => 'sometimes|nullable|string|max:512',
     ]);
 
@@ -419,11 +420,34 @@ class RutilahuController extends Controller
     /** GET /rutilahu/{uuid} */
     public function show($uuid)
     {
+        // 1. Ambil usulan Rutilahu
         $item = Rutilahu::where('uuid', $uuid)->first();
         if (!$item) {
-            return response()->json(['success' => false, 'message' => 'Data tidak ditemukan'], 404);
+            return response()->json([
+                'success' => false,
+                'message' => 'Data tidak ditemukan'
+            ], 404);
         }
 
+        // 2. Ambil semua perencanaan yg nempel ke usulan ini
+        //    Match: perencanaans.uuidUsulan == rutilahu.uuid
+        $perencanaanRows = Perencanaan::where('uuidUsulan', $item->uuid)
+            ->orderBy('created_at', 'desc')
+            ->get();
+
+        // 3. Bentuk payload perencanaan jadi array rapi
+        $perencanaanData = $perencanaanRows->map(function ($p) {
+            return [
+                'uuidPerencanaan' => $p->id,
+                'uuidUsulan'      => $p->uuidUsulan,
+                'nilaiHPS'        => $p->nilaiHPS,
+                'catatanSurvey'   => $p->catatanSurvey,
+                'created_at'      => $p->created_at,
+                'updated_at'      => $p->updated_at,
+            ];
+        })->values(); // values() biar indexnya 0,1,2,...
+
+        // 4. Response gabungan
         return response()->json([
             'success' => true,
             'data' => [
@@ -467,7 +491,7 @@ class RutilahuController extends Controller
                     'aksesAirMinum'          => $item->aksesAirMinum,
                     'aksesAirSanitasi'       => $item->aksesAirSanitasi,
 
-                    // Arrays UUID
+                    // Arrays UUID (dari cast model Rutilahu)
                     'fotoKTP'                => $item->fotoKTP,
                     'fotoSuratTanah'         => $item->fotoSuratTanah,
                     'fotoRumah'              => $item->fotoRumah,
@@ -477,11 +501,13 @@ class RutilahuController extends Controller
                     'pesan_verifikasi'       => $item->pesan_verifikasi,
                     'statusVerifikasi'       => $item->statusVerifikasi,
                     'created_at'             => $item->created_at,
-                ]
+                ],
+
+                // <- tambahan bagian relasi perencanaan
+                'perencanaan' => $perencanaanData,
             ]
         ]);
     }
-
     // ================= Helpers =================
 
     /** Aliases snake_case → camelCase + pesan & jenisKelamin + kondisi/akses */

@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Permukiman;
 use App\Models\PermukimanUpload;
 use App\Models\PermukimanUploadTemp;
+use App\Models\Perencanaan;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -84,22 +85,47 @@ class PermukimanController extends Controller
     /**
      * GET /permukiman/{id} (detail by PK string)
      */
-    public function show(string $id)
-    {
-        $data = Permukiman::find($id);
+   public function show(string $id)
+{
+    // ambil data utama permukiman
+    $data = Permukiman::find($id);
 
-        if (!$data) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Data tidak ditemukan',
-            ], 404);
-        }
-
+    if (!$data) {
         return response()->json([
-            'success' => true,
-            'data'    => $data,
-        ]);
+            'success' => false,
+            'message' => 'Data tidak ditemukan',
+        ], 404);
     }
+
+    // cari semua perencanaan yang nempel ke usulan ini
+    // asumsi: kolom relasi = perencanaans.uuidUsulan == $id
+    $perencanaanRows = Perencanaan::where('uuidUsulan', $id)
+        ->orderBy('created_at', 'desc')
+        ->get();
+
+    // bentuk list rapi
+    $perencanaanList = $perencanaanRows->map(function ($row) {
+        return [
+            'uuidPerencanaan' => $row->id,          // PK UUID di tabel perencanaans
+            'uuidUsulan'      => $row->uuidUsulan,  // harusnya sama dengan $id yang diminta di endpoint
+            'nilaiHPS'        => $row->nilaiHPS,
+            'catatanSurvey'   => $row->catatanSurvey,
+            'created_at'      => $row->created_at,
+            'updated_at'      => $row->updated_at,
+        ];
+    })->values();
+
+    return response()->json([
+        'success' => true,
+        'data'    => [
+            // semua kolom bawaan Permukiman
+            ...$data->toArray(),
+
+            // plus relasi perencanaan (bisa kosong [])
+            'perencanaan' => $perencanaanList,
+        ],
+    ]);
+}
 
     /**
      * POST /permukiman/create
@@ -240,7 +266,7 @@ class PermukimanController extends Controller
             'proposal_usulan'               => 'sometimes|nullable|array|min:1|max:10',
             'proposal_usulan.*'             => 'uuid',
 
-            'status_verifikasi'             => 'sometimes|integer|in:0,1,2,3,4',
+            'status_verifikasi'             => 'sometimes|integer|in:0,1,2,3,4,5,6,7,8,9',
         ]);
 
         // UUID baru yang harus dipindah

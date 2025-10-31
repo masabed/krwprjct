@@ -14,7 +14,10 @@ return new class extends Migration {
 
             $table->string('namaPemilikLahan');
             $table->string('ukuranLahan', 50);
-            $table->string('statusKepemilikan', 100);
+
+            // RENAME: statusKepemilikan -> statusLegalitasTanah
+            $table->string('statusLegalitasTanah', 100);
+
             $table->unsignedTinyInteger('status_verifikasi_usulan')->default(0);
             $table->string('pesan_verifikasi', 512)->nullable();
 
@@ -32,12 +35,10 @@ return new class extends Migration {
             // File disimpan sebagai ARRAY UUID (JSON)
             $table->json('buktiKepemilikan')->nullable();
             $table->json('dokumenProposal')->nullable();
-            $table->json('dokumenDJPM')->nullable();
+            // HAPUS: $table->json('dokumenDJPM')->nullable();
             $table->json('fotoLahan')->nullable();
 
             $table->timestamps();
-
-            // Jika ingin FK: tidak direkomendasikan untuk JSON array.
         });
     }
 

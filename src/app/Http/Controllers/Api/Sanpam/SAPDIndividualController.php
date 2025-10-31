@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\UsulanSAPDSIndividual;
 use App\Models\SAPDUpload;
 use App\Models\SAPDUploadTemp;
+use App\Models\Perencanaan;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -161,7 +162,7 @@ class SAPDIndividualController extends Controller
             'fotoLahan'                => 'sometimes|nullable|array|min:1|max:10',
             'fotoLahan.*'              => 'uuid',
 
-            'status_verifikasi_usulan' => 'sometimes|integer|in:0,1,2,3,4',
+            'status_verifikasi_usulan' => 'sometimes|integer|in:0,1,2,3,4,5,6,7,8,9',
         ]);
 
         // Siapkan UUID baru yang perlu dipindah
@@ -267,49 +268,69 @@ class SAPDIndividualController extends Controller
      * GET /api/sanpam/individual/{uuid}
      */
     public function show($uuid)
-    {
-        $item = UsulanSAPDSIndividual::where('uuid', $uuid)
-            // ->where('user_id', auth()->id()) // aktifkan jika hanya pemilik boleh lihat
-            ->first();
+{
+    $item = UsulanSAPDSIndividual::where('uuid', $uuid)
+        // ->where('user_id', auth()->id()) // aktifkan kalau mau batasi hanya pemilik yg boleh lihat
+        ->first();
 
-        if (!$item) {
-            return response()->json(['success' => false, 'message' => 'Data tidak ditemukan'], 404);
-        }
-
+    if (!$item) {
         return response()->json([
-            'success' => true,
-            'data' => [
-                'usulan' => [
-                    'uuid'                      => $item->uuid,
-                    'user_id'                   => $item->user_id,
-                    'namaCalonPenerima'         => $item->namaCalonPenerima,
-                    'nikCalonPenerima'          => $item->nikCalonPenerima,
-                    'noKKCalonPenerima'         => $item->noKKCalonPenerima,
-                    'alamatPenerima'            => $item->alamatPenerima,
-                    'rwPenerima'                => $item->rwPenerima,
-                    'rtPenerima'                => $item->rtPenerima,
-                    'kecamatan'                 => $item->kecamatan,
-                    'kelurahan'                 => $item->kelurahan,
-                    'ukuranLahan'               => $item->ukuranLahan,
-                    'ketersedianSumber'         => $item->ketersedianSumber,
-                    'titikLokasi'               => $item->titikLokasi,
-                    'pesan_verifikasi'          => $item->pesan_verifikasi,
-
-                    // ARRAY UUID
-                    'fotoRumah'                 => $item->fotoRumah,
-                    'fotoLahan'                 => $item->fotoLahan,
-
-                    'status_verifikasi_usulan'  => $item->status_verifikasi_usulan,
-                    'created_at'                => $item->created_at,
-                ],
-                // path untuk setiap UUID (array of {uuid, path})
-                'file_paths' => [
-                    'fotoRumah' => $this->resolveFilePaths($item->fotoRumah),
-                    'fotoLahan' => $this->resolveFilePaths($item->fotoLahan),
-                ],
-            ],
-        ]);
+            'success' => false,
+            'message' => 'Data tidak ditemukan'
+        ], 404);
     }
+
+    // Ambil semua data perencanaan yang terkait usulan ini
+    $perencanaanRows = Perencanaan::where('uuidUsulan', $uuid)
+        ->orderBy('created_at', 'desc')
+        ->get();
+
+    // Format rapi biar FE enak baca
+    $perencanaanList = $perencanaanRows->map(function ($row) {
+        return [
+            'uuidPerencanaan' => $row->id,          // PK UUID dari tabel perencanaans
+            'uuidUsulan'      => $row->uuidUsulan,  // harusnya sama kayak $uuid
+            'nilaiHPS'        => $row->nilaiHPS,
+            'catatanSurvey'   => $row->catatanSurvey,
+            'created_at'      => $row->created_at,
+            'updated_at'      => $row->updated_at,
+        ];
+    })->values();
+
+    return response()->json([
+        'success' => true,
+        'data' => [
+            'usulan' => [
+                'uuid'                      => $item->uuid,
+                'user_id'                   => $item->user_id,
+                'namaCalonPenerima'         => $item->namaCalonPenerima,
+                'nikCalonPenerima'          => $item->nikCalonPenerima,
+                'noKKCalonPenerima'         => $item->noKKCalonPenerima,
+                'alamatPenerima'            => $item->alamatPenerima,
+                'rwPenerima'                => $item->rwPenerima,
+                'rtPenerima'                => $item->rtPenerima,
+                'kecamatan'                 => $item->kecamatan,
+                'kelurahan'                 => $item->kelurahan,
+                'ukuranLahan'               => $item->ukuranLahan,
+                'ketersedianSumber'         => $item->ketersedianSumber,
+                'titikLokasi'               => $item->titikLokasi,
+                'pesan_verifikasi'          => $item->pesan_verifikasi,
+
+                // ARRAY UUID file
+                'fotoRumah'                 => $item->fotoRumah,
+                'fotoLahan'                 => $item->fotoLahan,
+
+                'status_verifikasi_usulan'  => $item->status_verifikasi_usulan,
+                'created_at'                => $item->created_at,
+                'updated_at'                => $item->updated_at,
+            ],
+
+            // daftar perencanaan yang terkait sama usulan ini
+            'perencanaan' => $perencanaanList,
+        ],
+    ]);
+}
+
 
     // ================= Helpers =================
 
