@@ -61,8 +61,8 @@ return new class extends Migration {
             $table->json('dokumentasiSurvey')->nullable();
 
             // Verifikasi (0..4)
-            $table->unsignedTinyInteger('statusVerifikasi')->default(0)->comment('0..4');
-            $table->index('statusVerifikasi');
+            $table->unsignedTinyInteger('status_verifikasi_usulan')->default(0)->comment('0..4');
+            $table->index('status_verifikasi_usulan');
 
             // user id bertipe UUID
             $table->uuid('user_id')->index();

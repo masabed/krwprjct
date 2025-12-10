@@ -10,36 +10,86 @@ class Rutilahu extends Model
 
     protected $fillable = [
         'uuid',
+
+        // Sumber & pengusul
+        'sumberUsulan',
+        'namaAspirator',
+        'noKontakAspirator',
+
         'jenisProgram',
-        'kecamatan','kelurahan','nama_CPCL','nomorNIK','nomorKK','jumlahKeluarga',
-        'alamatDusun','alamatRT','alamatRW',
-        'umur','luasTanah','luasBangunan','pendidikanTerakhir','pekerjaan',
-        'besaranPenghasilan','statusKepemilikanRumah','asetRumahLain','asetTanahLain',
-        'sumberPenerangan','bantuanPerumahan','jenisKawasan','pesan_verifikasi',
+
+        // Lokasi/administrasi
+        'kecamatan',
+        'kelurahan',
+        'titikLokasi',
+
+        // Identitas CPCL
+        'nama_CPCL',
+        'nomorNIK',
+        'nomorKK',
+        'jumlahKeluarga',
+
+        // Alamat detail
+        'alamatDusun',
+        'alamatRT',
+        'alamatRW',
+
+        // Data personal & aset
+        'umur',
+        'luasTanah',
+        'luasBangunan',
+        'pendidikanTerakhir',
+        'pekerjaan',
+        'besaranPenghasilan',
+        'statusKepemilikanRumah',
+        'asetRumahLain',
+        'asetTanahLain',
+
+        // Utilitas & program
+        'sumberPenerangan',
+        'bantuanPerumahan',
+        'jenisKawasan',
+        'pesan_verifikasi',
         'jenisKelamin',
 
-        // kondisi bangunan
-        'kondisiPondasi','kondisiSloof','kondisiKolom','kondisiRingBalok','kondisiRangkaAtap',
-        'kondisiDinding','kondisiLantai','kondisiPenutupAtap','aksesAirMinum','aksesAirSanitasi',
+        // Kondisi bangunan
+        'kondisiPondasi',
+        'kondisiSloof',
+        'kondisiKolom',
+        'kondisiRingBalok',
+        'kondisiRangkaAtap',
+        'kondisiDinding',
+        'kondisiLantai',
+        'kondisiPenutupAtap',
+        'aksesAirMinum',
+        'aksesAirSanitasi',
 
-        // file (JSON arrays)
-        'fotoKTP','fotoSuratTanah','fotoRumah','fotoKK',
-        'dokumentasiSurvey','statusVerifikasi','user_id',
+        // File (JSON arrays)
+        'fotoKTP',
+        'fotoSuratTanah',
+        'fotoRumah',
+        'fotoKK',
+        'dokumentasiSurvey',
+
+        // Status/verifikator
+        'status_verifikasi_usulan',
+        'user_id',
     ];
 
-    // Sabuk pengaman di sisi app
     protected $attributes = [
-        'statusVerifikasi' => 0,
+        'status_verifikasi_usulan' => 0,
     ];
 
     protected $casts = [
-        'statusVerifikasi'   => 'integer',
+        'status_verifikasi_usulan' => 'integer',
 
-        // File arrays
-        'fotoKTP'            => 'array',
-        'fotoSuratTanah'     => 'array',
-        'fotoRumah'    => 'array',
-        'fotoKK'             => 'array',
-        'dokumentasiSurvey'  => 'array',
+        'fotoKTP'           => 'array',
+        'fotoSuratTanah'    => 'array',
+        'fotoRumah'         => 'array',
+        'fotoKK'            => 'array',
+        'dokumentasiSurvey' => 'array',
+
+        'created_at'        => 'datetime',
+        'updated_at'        => 'datetime',
     ];
 }

@@ -15,31 +15,38 @@ class SAPDLahanMasyarakat extends Model
     protected $keyType = 'string';
 
     protected $fillable = [
-        'uuid', // optional; HasUuids akan auto-set jika tidak diisi
+        'uuid',
+
+        // Sumber & pengusul (sesuai FormData)
+        'sumberUsulan',
+        'namaAspirator',
+        'noKontakAspirator',
+
+        // Data lahan
         'namaPemilikLahan',
         'ukuranLahan',
-
-        // RENAME: statusKepemilikan -> statusLegalitasTanah
         'statusLegalitasTanah',
 
+        // Alamat
         'alamatDusun',
         'alamatRT',
         'alamatRW',
         'kecamatan',
         'kelurahan',
         'titikLokasi',
+
         'user_id',
 
         // arrays (JSON)
-        'buktiKepemilikan',
-        'dokumenProposal',
-
-        // HAPUS: 'dokumenDJPM' (sudah digabungkan ke buktiKepemilikan)
-
+        'buktiLegalitasTanah',
         'fotoLahan',
 
         'status_verifikasi_usulan',
         'pesan_verifikasi',
+    ];
+
+    protected $attributes = [
+        'status_verifikasi_usulan' => 0,
     ];
 
     protected $casts = [
@@ -47,9 +54,8 @@ class SAPDLahanMasyarakat extends Model
         'updated_at'               => 'datetime',
         'status_verifikasi_usulan' => 'integer',
 
-        // file arrays
-        'buktiKepemilikan'         => 'array',
-        'dokumenProposal'          => 'array',
+        // JSON casts
+        'buktiLegalitasTanah'      => 'array',
         'fotoLahan'                => 'array',
     ];
 }

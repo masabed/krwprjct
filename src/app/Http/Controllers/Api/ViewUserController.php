@@ -48,6 +48,54 @@ class ViewUserController extends Controller
         ]);
     }
 
+public function indexPengawas(Request $request)
+{
+    $auth = auth()->user();
+    if (!$auth) {
+        return response()->json(['error' => 'Unauthenticated.'], 401);
+    }
+
+    // Hanya admin / admin_bidang yang boleh lihat daftar pengawas
+    if (!in_array($auth->role ?? null, ['admin','admin_bidang'], true)) {
+        return response()->json(['error' => 'Unauthorized.'], 403);
+    }
+
+    $q = trim((string) $request->query('q', ''));
+
+    // Deteksi apakah tabel users punya kolom 'uuid'
+    $userModel = new \App\Models\User;
+    $userTable = $userModel->getTable();
+    $hasUuid   = \Illuminate\Support\Facades\Schema::hasColumn($userTable, 'uuid');
+
+    $users = \App\Models\User::query()
+        ->where('role', 'pengawas')
+        ->when($q !== '', function ($qq) use ($q) {
+            $qq->where(function ($w) use ($q) {
+                $w->where('name', 'like', "%{$q}%")
+                  ->orWhere('username', 'like', "%{$q}%")
+                  ->orWhere('email', 'like', "%{$q}%");
+            });
+        })
+        ->orderByDesc('created_at')
+        // Ambil kolom minimal untuk efisiensi; kalau tidak ada 'uuid', ambil 'id'
+        ->get($hasUuid ? ['name', 'uuid'] : ['name', 'id'])
+        // Petakan output agar selalu punya key 'uuid'
+        ->map(function ($u) use ($hasUuid) {
+            return [
+                'uuid' => (string) ($hasUuid ? $u->uuid : $u->id),
+                'name' => (string) $u->name,
+            ];
+        })
+        ->values();
+
+    return response()->json([
+        'success' => true,
+        'count'   => $users->count(),
+        'data'    => $users,
+    ]);
+}
+
+
     // View own profile
     public function profile()
     {

@@ -48,7 +48,6 @@ class PSUUsulanFisikPJL extends Model
 
         // dokumen (arrays)
         'suratPermohonanUsulanFisik',
-        'proposalUsulanFisik',
         'dokumentasiEksisting',
 
         // meta
@@ -58,12 +57,41 @@ class PSUUsulanFisikPJL extends Model
     ];
 
     protected $casts = [
+        'tanggalPermohonan'          => 'date',
+
         'suratPermohonanUsulanFisik' => 'array',
-        'proposalUsulanFisik'        => 'array',
         'dokumentasiEksisting'       => 'array',
 
-        'status_verifikasi_usulan' => 'integer',
-        'created_at'               => 'datetime',
-        'updated_at'               => 'datetime',
+        'status_verifikasi_usulan'   => 'integer',
+        'created_at'                 => 'datetime',
+        'updated_at'                 => 'datetime',
     ];
+
+    protected static function booted(): void
+    {
+        static::creating(function (self $m) {
+            // default [] untuk JSON dokumen
+            foreach (['suratPermohonanUsulanFisik', 'dokumentasiEksisting'] as $f) {
+                if (!array_key_exists($f, $m->attributes) || is_null($m->{$f})) {
+                    $m->{$f} = [];
+                }
+            }
+
+            // default status verifikasi = 0
+            if (!array_key_exists('status_verifikasi_usulan', $m->attributes)
+                || is_null($m->status_verifikasi_usulan)) {
+                $m->status_verifikasi_usulan = 0;
+            }
+        });
+    }
+
+    public function user()
+    {
+        return $this->belongsTo(\App\Models\User::class, 'user_id', 'id');
+    }
+
+    public function perumahan()
+    {
+        return $this->belongsTo(\App\Models\Perumahan::class, 'perumahanId', 'id');
+    }
 }

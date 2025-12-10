@@ -1,29 +1,47 @@
 <?php
 
-namespace App\Http\Controllers\Api\PSU;
+namespace App\Http\Controllers\Api\Psu;
 
 use App\Http\Controllers\Controller;
 use App\Models\PSUUsulanFisikPerumahan;
 use App\Models\PSUUploadTemp;
 use App\Models\PSUUpload;
 use App\Models\Perencanaan;
+use App\Models\Pembangunan;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
 class PSUUsulanFisikPerumahanController extends Controller
 {
+    /**
+     * Field dokumen (array UUID) yang dipakai di usulan fisik perumahan.
+     * Sesuai FormData: hanya 2 dokumen → suratPermohonanUsulanFisik, dokumentasiEksisting
+     */
     private const FILE_ARRAY_FIELDS = [
         'suratPermohonanUsulanFisik',
-        'proposalUsulanFisik',
         'dokumentasiEksisting',
     ];
 
     /** GET /api/psu/usulan/perumahan */
     public function index(Request $request)
     {
+        $user = $request->user();
+        if (!$user) {
+            return response()->json(['success' => false, 'message' => 'Unauthenticated'], 401);
+        }
+
+        $role    = strtolower((string) ($user->role ?? ''));
+        $isAdmin = in_array($role, ['admin', 'admin_bidang'], true);
+
         $q = PSUUsulanFisikPerumahan::query()->latest();
 
+        // user non-admin hanya lihat data miliknya
+        if (!$isAdmin) {
+            $q->where('user_id', (string) $user->id);
+        }
+
+        // filter opsional
         if ($request->has('perumahanId')) {
             $q->where('perumahanId', $request->query('perumahanId'));
         }
@@ -31,7 +49,10 @@ class PSUUsulanFisikPerumahanController extends Controller
             $q->where('status_verifikasi_usulan', (int) $request->query('status_verifikasi_usulan'));
         }
 
-        return response()->json(['success' => true, 'data' => $q->get()]);
+        return response()->json([
+            'success' => true,
+            'data'    => $q->get(),
+        ]);
     }
 
     /** POST /api/psu/usulan/perumahan/create */
@@ -42,36 +63,43 @@ class PSUUsulanFisikPerumahanController extends Controller
             return response()->json(['success' => false, 'message' => 'Unauthenticated'], 401);
         }
 
+        // Normalisasi semua field dokumen
         foreach (self::FILE_ARRAY_FIELDS as $f) {
             $this->normalizeUuidArrayField($request, $f);
         }
 
         $payload = $request->validate([
-            'tanggalPermohonan'            => 'required|string|max:30',
-            'nomorSuratPermohonan'         => 'required|string|max:255',
-            'sumberUsulan'                 => 'required|string|max:100',
-            'namaAspirator'                => 'required|string|max:150',
-            'noKontakAspirator'            => 'required|string|max:50',
-            'namaPIC'                      => 'required|string|max:150',
-            'noKontakPIC'                  => 'required|string|max:50',
-            'jenisUsulan'                  => 'required|string|max:100',
-            'uraianMasalah'                => 'sometimes|nullable|string',
-            'dimensiUsulan'                => 'sometimes|nullable|string|max:150',
-            'alamatUsulan'                 => 'required|string|max:500',
-            'rtUsulan'                     => 'sometimes|nullable|string|max:10',
-            'rwUsulan'                     => 'sometimes|nullable|string|max:10',
-            'titikLokasiUsulan'            => 'sometimes|nullable|string|max:255',
-            'perumahanId'                  => 'required|uuid',
+            'tanggalPermohonan'             => 'required|string|max:30',
+            'nomorSuratPermohonan'          => 'required|string|max:255',
+            'sumberUsulan'                  => 'required|string|max:100',
+            'namaAspirator'                 => 'required|string|max:150',
+            'noKontakAspirator'             => 'required|string|max:50',
+            'namaPIC'                       => 'required|string|max:150',
+            'noKontakPIC'                   => 'required|string|max:50',
+            'jenisUsulan'                   => 'required|string|max:100',
+            'uraianMasalah'                 => 'sometimes|nullable|string',
 
-            'suratPermohonanUsulanFisik'   => 'required|array|min:1|max:20',
-            'suratPermohonanUsulanFisik.*' => 'uuid',
-            'proposalUsulanFisik'          => 'required|array|min:1|max:20',
-            'proposalUsulanFisik.*'        => 'uuid',
-            'dokumentasiEksisting'         => 'required|array|min:1|max:30',
-            'dokumentasiEksisting.*'       => 'uuid',
+            // dimensi
+            'dimensiUsulanUtama'           => 'sometimes|nullable|string|max:150',
+            'dimensiUsulanTambahan'        => 'sometimes|nullable|string|max:150',
 
-            'status_verifikasi_usulan'     => 'sometimes|integer|in:0,1,2,3,4',
-            'pesan_verifikasi'             => 'sometimes|nullable|string|max:512',
+            // lokasi
+            'alamatUsulan'                  => 'required|string|max:500',
+            'rtUsulan'                      => 'sometimes|nullable|string|max:10',
+            'rwUsulan'                      => 'sometimes|nullable|string|max:10',
+            'titikLokasiUsulan'             => 'sometimes|nullable|string|max:255',
+            'perumahanId'                   => 'required|uuid',
+
+            // dokumen (sesuai FormData: hanya 2)
+            'suratPermohonanUsulanFisik'    => 'required|array|min:1|max:20',
+            'suratPermohonanUsulanFisik.*'  => 'uuid',
+
+            'dokumentasiEksisting'          => 'required|array|min:1|max:30',
+            'dokumentasiEksisting.*'        => 'uuid',
+
+            // meta verifikasi
+            'status_verifikasi_usulan'      => 'sometimes|integer|in:0,1,2,3,4',
+            'pesan_verifikasi'              => 'sometimes|nullable|string|max:512',
         ]);
 
         $row = PSUUsulanFisikPerumahan::create([
@@ -79,10 +107,10 @@ class PSUUsulanFisikPerumahanController extends Controller
             'user_id' => (string) $user->id,
         ]);
 
+        // kumpulkan semua UUID file yang dipakai (2 field saja sekarang)
         $uuids = array_values(array_unique(array_merge(
-            $payload['suratPermohonanUsulanFisik'],
-            $payload['proposalUsulanFisik'],
-            $payload['dokumentasiEksisting'],
+            $payload['suratPermohonanUsulanFisik'] ?? [],
+            $payload['dokumentasiEksisting'] ?? [],
         )));
         $this->moveTempsToFinal($uuids, (string) $user->id);
 
@@ -107,57 +135,79 @@ class PSUUsulanFisikPerumahanController extends Controller
             return response()->json(['success' => false, 'message' => 'Data tidak ditemukan'], 404);
         }
 
+        // Normalisasi hanya field dokumen yang dikirim
         foreach (self::FILE_ARRAY_FIELDS as $f) {
-            if ($request->has($f)) $this->normalizeUuidArrayField($request, $f);
+            if ($request->has($f)) {
+                $this->normalizeUuidArrayField($request, $f);
+            }
         }
 
         $validated = $request->validate([
-            'tanggalPermohonan'            => 'sometimes|string|max:30',
-            'nomorSuratPermohonan'         => 'sometimes|string|max:255',
-            'sumberUsulan'                 => 'sometimes|string|max:100',
-            'namaAspirator'                => 'sometimes|string|max:150',
-            'noKontakAspirator'            => 'sometimes|string|max:50',
-            'namaPIC'                      => 'sometimes|string|max:150',
-            'noKontakPIC'                  => 'sometimes|string|max:50',
-            'jenisUsulan'                  => 'sometimes|string|max:100',
-            'uraianMasalah'                => 'sometimes|nullable|string',
-            'dimensiUsulan'                => 'sometimes|nullable|string|max:150',
-            'alamatUsulan'                 => 'sometimes|string|max:500',
-            'rtUsulan'                     => 'sometimes|nullable|string|max:10',
-            'rwUsulan'                     => 'sometimes|nullable|string|max:10',
-            'titikLokasiUsulan'            => 'sometimes|nullable|string|max:255',
-            'perumahanId'                  => 'sometimes|uuid',
+            'tanggalPermohonan'             => 'sometimes|string|max:30',
+            'nomorSuratPermohonan'          => 'sometimes|string|max:255',
+            'sumberUsulan'                  => 'sometimes|string|max:100',
+            'namaAspirator'                 => 'sometimes|string|max:150',
+            'noKontakAspirator'             => 'sometimes|string|max:50',
+            'namaPIC'                       => 'sometimes|string|max:150',
+            'noKontakPIC'                   => 'sometimes|string|max:50',
+            'jenisUsulan'                   => 'sometimes|string|max:100',
+            'uraianMasalah'                 => 'sometimes|nullable|string',
 
-            'suratPermohonanUsulanFisik'   => 'sometimes|nullable|array|min:1|max:20',
-            'suratPermohonanUsulanFisik.*' => 'uuid',
-            'proposalUsulanFisik'          => 'sometimes|nullable|array|min:1|max:20',
-            'proposalUsulanFisik.*'        => 'uuid',
-            'dokumentasiEksisting'         => 'sometimes|nullable|array|min:1|max:30',
-            'dokumentasiEksisting.*'       => 'uuid',
+            'dimensiUsulanUtama'            => 'sometimes|nullable|string|max:150',
+            'dimensiUsulanTambahan'         => 'sometimes|nullable|string|max:150',
 
-            'status_verifikasi_usulan'     => 'sometimes|integer|in:0,1,2,3,4,5,6,7,8,9',
-            'pesan_verifikasi'             => 'sometimes|nullable|string|max:512',
+            'alamatUsulan'                  => 'sometimes|string|max:500',
+            'rtUsulan'                      => 'sometimes|nullable|string|max:10',
+            'rwUsulan'                      => 'sometimes|nullable|string|max:10',
+            'titikLokasiUsulan'             => 'sometimes|nullable|string|max:255',
+            'perumahanId'                   => 'sometimes|uuid',
+
+            // File arrays (nullable → kalau null, abaikan/tidak overwrite)
+            'suratPermohonanUsulanFisik'    => 'sometimes|nullable|array|min:1|max:20',
+            'suratPermohonanUsulanFisik.*'  => 'uuid',
+            'dokumentasiEksisting'          => 'sometimes|nullable|array|min:1|max:30',
+            'dokumentasiEksisting.*'        => 'uuid',
+
+            // Verifikasi
+            'status_verifikasi_usulan'      => 'sometimes|integer|in:0,1,2,3,4,5,6,7,8,9',
+            'pesan_verifikasi'              => 'sometimes|nullable|string|max:512',
         ]);
 
-        // UUID baru dari temp → final
+        // UUID file baru (temp → final), tanpa overwrite dengan null
         $uuidsToMove = [];
         foreach (self::FILE_ARRAY_FIELDS as $f) {
-            if (!array_key_exists($f, $validated)) continue;
-            if (is_null($validated[$f])) { unset($validated[$f]); continue; }
+            if (!array_key_exists($f, $validated)) {
+                continue;
+            }
+
+            if (is_null($validated[$f])) {
+                // jangan sentuh kolom file di DB
+                unset($validated[$f]);
+                continue;
+            }
 
             $incoming = $validated[$f] ?? [];
             $existing = $item->getAttribute($f) ?? [];
-            $diff = array_diff($incoming, is_array($existing) ? $existing : []);
-            if (!empty($diff)) $uuidsToMove = array_merge($uuidsToMove, $diff);
+            $diff     = array_diff($incoming, is_array($existing) ? $existing : []);
+            if (!empty($diff)) {
+                $uuidsToMove = array_merge($uuidsToMove, $diff);
+            }
         }
-        if ($uuidsToMove) {
+
+        if (!empty($uuidsToMove)) {
             $this->moveTempsToFinal(array_values(array_unique($uuidsToMove)), (string) $user->id);
         }
 
         $item->fill($validated);
-        $dirty = $item->getDirty();
 
-        if (!$dirty) {
+        // Auto-clear pesan kalau status dikirim dan >= 4
+        if ($request->has('status_verifikasi_usulan')
+            && (int) $request->input('status_verifikasi_usulan') >= 4) {
+            $item->pesan_verifikasi = null;
+        }
+
+        $dirty = $item->getDirty();
+        if (empty($dirty)) {
             return response()->json([
                 'success' => true,
                 'message' => 'Tidak ada perubahan data',
@@ -175,35 +225,200 @@ class PSUUsulanFisikPerumahanController extends Controller
         ]);
     }
 
-    /** GET /api/psu/usulan/perumahan/{uuid}  (+ tarik Perencanaan by uuidUsulan) */
+    /** GET /api/psu/usulan/perumahan/{uuid} */
     public function show(string $uuid)
     {
+        $auth = auth()->user();
+        if (!$auth) {
+            return response()->json(['success' => false, 'message' => 'Unauthenticated'], 401);
+        }
+
         $row = PSUUsulanFisikPerumahan::where('uuid', $uuid)->first();
         if (!$row) {
             return response()->json(['success' => false, 'message' => 'Data tidak ditemukan'], 404);
         }
 
-        // Ambil perencanaan yang terkait usulan ini
+        $role    = strtolower((string) ($auth->role ?? ''));
+        $isOwner = (string) ($row->user_id ?? '') === (string) $auth->id;
+        $isPriv  = in_array($role, ['admin','admin_bidang','pengawas'], true);
+        if (!$isPriv && !$isOwner) {
+            return response()->json(['success' => false, 'message' => 'Unauthorized'], 403);
+        }
+
+        // Perencanaan
         $perencanaanRows = Perencanaan::where('uuidUsulan', $uuid)
             ->orderBy('created_at', 'desc')
             ->get();
 
         $perencanaanList = $perencanaanRows->map(function ($r) {
             return [
-                'uuidPerencanaan' => $r->id,          // PK string dari tabel perencanaans
-                'uuidUsulan'      => $r->uuidUsulan,
+                'uuidPerencanaan' => (string) $r->id,
+                'uuidUsulan'      => (string) $r->uuidUsulan,
                 'nilaiHPS'        => $r->nilaiHPS,
+                'lembarKontrol'   => $r->lembarKontrol,
                 'catatanSurvey'   => $r->catatanSurvey,
                 'created_at'      => $r->created_at,
                 'updated_at'      => $r->updated_at,
             ];
         })->values();
 
+        // Pembangunan (support string/JSON array)
+        $pembangunanRows = Pembangunan::query()
+            ->where(function($q) use ($uuid) {
+                $q->where('uuidUsulan', $uuid)
+                  ->orWhereJsonContains('uuidUsulan', $uuid);
+            })
+            ->orderBy('created_at', 'desc')
+            ->get();
+
+        // Resolve nama pengawas lapangan
+        $pengawasKeys = $pembangunanRows->pluck('pengawasLapangan')
+            ->filter(fn ($v) => !empty($v))
+            ->map(fn ($v) => (string) $v)
+            ->unique()
+            ->values();
+
+        $usersById   = collect();
+        $usersByUuid = collect();
+
+        if ($pengawasKeys->isNotEmpty() && class_exists(\App\Models\User::class)) {
+            try {
+                $usersById = \App\Models\User::query()
+                    ->select('id','name','username')
+                    ->whereIn('id', $pengawasKeys)
+                    ->get()
+                    ->keyBy(fn ($u) => (string) $u->id);
+            } catch (\Throwable $e) { $usersById = collect(); }
+
+            try {
+                $userTable = (new \App\Models\User)->getTable();
+                if (\Schema::hasColumn($userTable, 'uuid')) {
+                    $usersByUuid = \App\Models\User::query()
+                        ->select('uuid','name','username')
+                        ->whereIn('uuid', $pengawasKeys)
+                        ->get()
+                        ->keyBy(fn ($u) => (string) $u->uuid);
+                }
+            } catch (\Throwable $e) { $usersByUuid = collect(); }
+        }
+
+        $pembangunanList = $pembangunanRows->map(function ($b) use ($usersById, $usersByUuid) {
+            // Normalisasi uuidUsulan → array
+            $uuList = [];
+            $uuRaw  = $b->uuidUsulan;
+
+            if (is_array($uuRaw)) {
+                $uuList = $uuRaw;
+            } elseif (is_string($uuRaw)) {
+                $t = trim($uuRaw);
+                if ($t !== '' && str_starts_with($t, '[')) {
+                    $arr = json_decode($t, true);
+                    $uuList = is_array($arr) ? $arr : [];
+                } elseif ($t !== '') {
+                    $uuList = [$t];
+                }
+            }
+
+            $uuidUsulanCount = collect($uuList)
+                ->map(fn($v) => trim((string)$v))
+                ->filter(fn($v) => $v !== '')
+                ->unique()
+                ->count();
+
+            $key  = (string) ($b->pengawasLapangan ?? '');
+            $name = null;
+            if ($key !== '') {
+                $u = $usersById->get($key) ?? $usersByUuid->get($key);
+                $name = $u->name ?? $u->username ?? null;
+            }
+
+            return [
+                'uuidPembangunan'       => (string) $b->id,
+                'uuidUsulan'            => $uuList,
+                'nomorSPK'              => $b->nomorSPK,
+                'tanggalSPK'            => $b->tanggalSPK,
+                'nilaiKontrak'          => $b->nilaiKontrak,
+                'unit'                  => $b->unit,
+                'kontraktorPelaksana'   => $b->kontraktorPelaksana,
+                'tanggalMulai'          => $b->tanggalMulai,
+                'tanggalSelesai'        => $b->tanggalSelesai,
+                'jangkaWaktu'           => $b->jangkaWaktu,
+                'pengawasLapangan'      => $b->pengawasLapangan,
+                'pengawasLapangan_name' => $name,
+                'uuidUsulan_count'      => $uuidUsulanCount,
+                'created_at'            => $b->created_at,
+                'updated_at'            => $b->updated_at,
+            ];
+        })->values();
+
+        // Pengawasan terkait
+        $canSeeAllPengawasan = in_array($role, ['admin','admin_bidang','pengawas'], true) || $isOwner;
+
+        $pengawasanRows = \App\Models\Pengawasan::query()
+            ->where('uuidUsulan', $uuid)
+            ->when(!$canSeeAllPengawasan, fn($q) => $q->where('pengawas', (string) $auth->id))
+            ->orderByDesc('tanggal_pengawasan')
+            ->orderByDesc('created_at')
+            ->get();
+
+        $pengawasCatatanKeys = $pengawasanRows->pluck('pengawas')
+            ->filter(fn($v) => !empty($v))
+            ->map(fn($v) => (string)$v)
+            ->diff($pengawasKeys)
+            ->values();
+
+        if ($pengawasCatatanKeys->isNotEmpty() && class_exists(\App\Models\User::class)) {
+            try {
+                $addById = \App\Models\User::query()
+                    ->select('id','name','username')
+                    ->whereIn('id', $pengawasCatatanKeys)
+                    ->get()
+                    ->keyBy(fn($u) => (string)$u->id);
+                $usersById = $usersById->merge($addById);
+            } catch (\Throwable $e) {}
+
+            try {
+                $userTable = (new \App\Models\User)->getTable();
+                if (\Schema::hasColumn($userTable, 'uuid')) {
+                    $addByUuid = \App\Models\User::query()
+                        ->select('uuid','name','username')
+                        ->whereIn('uuid', $pengawasCatatanKeys)
+                        ->get()
+                        ->keyBy(fn($u) => (string)$u->uuid);
+                    $usersByUuid = $usersByUuid->merge($addByUuid);
+                }
+            } catch (\Throwable $e) {}
+        }
+
+        $pengawasanList = $pengawasanRows->map(function ($r) use ($usersById, $usersByUuid) {
+            $k = (string) ($r->pengawas ?? '');
+            $nm = null;
+            if ($k !== '') {
+                $u = $usersById->get($k) ?? $usersByUuid->get($k);
+                $nm = $u->name ?? $u->username ?? null;
+            }
+
+            return [
+                'id'                 => (string) $r->id,
+                'uuidUsulan'         => (string) $r->uuidUsulan,
+                'uuidPembangunan'    => (string) $r->uuidPembangunan,
+                'pengawas'           => (string) $r->pengawas,
+                'pengawas_name'      => $nm,
+                'tanggal_pengawasan' => $r->tanggal_pengawasan,
+                'foto'               => is_array($r->foto) ? $r->foto : [],
+                'pesan_pengawasan'   => $r->pesan_pengawasan,
+                'created_at'         => $r->created_at,
+                'updated_at'         => $r->updated_at,
+            ];
+        })->values();
+
         return response()->json([
             'success' => true,
             'data' => [
-                'usulan'      => $row,
-                'perencanaan' => $perencanaanList,
+                'usulan'       => $row,
+                'perencanaan'  => $perencanaanList,
+                'pembangunan'  => $pembangunanList,
+                'pengawasan'   => $pengawasanList,
             ],
         ]);
     }
@@ -211,13 +426,63 @@ class PSUUsulanFisikPerumahanController extends Controller
     /** DELETE /api/psu/usulan/perumahan/{uuid} */
     public function destroy(string $uuid)
     {
-        $row = PSUUsulanFisikPerumahan::where('uuid', $uuid)->first();
+        if (!auth()->check()) {
+            return response()->json(['success' => false, 'message' => 'Unauthenticated'], 401);
+        }
+
+        /** @var \App\Models\PSUUsulanFisikPerumahan|null $row */
+        $row = \App\Models\PSUUsulanFisikPerumahan::where('uuid', $uuid)->first();
         if (!$row) {
             return response()->json(['success' => false, 'message' => 'Data tidak ditemukan'], 404);
         }
-        $row->delete();
 
-        return response()->json(['success' => true, 'message' => 'Data berhasil dihapus']);
+        \DB::transaction(function () use ($uuid, $row) {
+            // 1) Hapus semua Perencanaan yang menempel ke usulan ini
+            \App\Models\Perencanaan::where('uuidUsulan', $uuid)->delete();
+
+            // 2) Cabut UUID usulan ini dari semua Pembangunan terkait
+            $buildRows = \App\Models\Pembangunan::query()
+                ->where('uuidUsulan', $uuid)
+                ->orWhereJsonContains('uuidUsulan', $uuid)
+                ->get();
+
+            foreach ($buildRows as $b) {
+                $raw = $b->getAttribute('uuidUsulan');
+
+                if (is_array($raw)) {
+                    $arr = $raw;
+                } elseif (is_string($raw)) {
+                    $t = trim($raw);
+                    if ($t !== '' && str_starts_with($t, '[')) {
+                        $dec = json_decode($t, true);
+                        $arr = is_array($dec) ? $dec : [];
+                    } elseif ($t !== '') {
+                        $arr = [$t];
+                    } else {
+                        $arr = [];
+                    }
+                } else {
+                    $arr = [];
+                }
+
+                $after = collect($arr)
+                    ->map(fn($v) => trim((string)$v))
+                    ->filter(fn($v) => $v !== '' && $v !== $uuid)
+                    ->values()
+                    ->all();
+
+                $b->uuidUsulan = $after ? $after : null;
+                $b->save();
+            }
+
+            // 3) Hapus usulan utama
+            $row->delete();
+        });
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Data berhasil dihapus; perencanaan dihapus dan UUID dicabut dari pembangunan.',
+        ]);
     }
 
     // =============== Helpers ===============
@@ -246,7 +511,12 @@ class PSUUsulanFisikPerumahanController extends Controller
             if (str_starts_with($t, '[')) {
                 $arr = json_decode($t, true);
                 $uuids = [];
-                if (is_array($arr)) foreach ($arr as $v) { $u = $this->extractUuid((string) $v); if ($u) $uuids[] = $u; }
+                if (is_array($arr)) {
+                    foreach ($arr as $v) {
+                        $u = $this->extractUuid((string) $v);
+                        if ($u) $uuids[] = $u;
+                    }
+                }
                 $request->merge([$field => array_values(array_unique($uuids))]);
                 return;
             }
@@ -254,7 +524,10 @@ class PSUUsulanFisikPerumahanController extends Controller
             if (str_contains($t, ',')) {
                 $parts = array_map('trim', explode(',', $t));
                 $uuids = [];
-                foreach ($parts as $p) { $u = $this->extractUuid($p); if ($u) $uuids[] = $u; }
+                foreach ($parts as $p) {
+                    $u = $this->extractUuid($p);
+                    if ($u) $uuids[] = $u;
+                }
                 $request->merge([$field => array_values(array_unique($uuids))]);
                 return;
             }
@@ -285,7 +558,7 @@ class PSUUsulanFisikPerumahanController extends Controller
             $temp = $temps->get($u);
             if (!$temp) continue;
 
-            $old = $temp->file_path; // psu_temp/<uuid>.<ext>
+            $old  = $temp->file_path; // psu_temp/<uuid>.<ext>
             $file = basename($old);
             $new  = 'psu_final/' . $file;
 

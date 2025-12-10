@@ -19,8 +19,8 @@ class PsuSerahTerima extends Model
 
         // Pemohon
         'tipePengaju',
-        'namaPengusul',
-        'nikPengusul',
+        'namaPemohon',
+        'nikPemohon',
         'noKontak',
         'email',
 
@@ -37,7 +37,7 @@ class PsuSerahTerima extends Model
         'jenisPSU',          // JSON (array of strings)
         'nomorSiteplan',
         'tanggalSiteplan',
-        'noSuratPST',        // <-- pastikan kolom ini ada di migration jika kamu pakai
+        'noSuratPST',
 
         // Luasan
         'luasKeseluruhan',
@@ -49,22 +49,23 @@ class PsuSerahTerima extends Model
         'dokumenIzinPemanfaatan',
         'dokumenKondisi',
         'dokumenTeknis',
-        'ktpPengusul',
+        'ktpPemohon',
         'aktaPerusahaan',
         'suratPermohonanPenyerahan',
-        'noBASTPSU',
-        'noSuratPST',
         'dokumenSiteplan',
         'salinanSertifikat',
 
+        // Non-file tambahan
+        'noBASTPSU',
+
         // Verifikasi & audit
-        'status_verifikasi',
+        'status_verifikasi_usulan',
         'pesan_verifikasi',
         'user_id',
     ];
 
     protected $attributes = [
-        'status_verifikasi' => 0,
+        'status_verifikasi_usulan' => 0,
     ];
 
     protected $casts = [
@@ -75,7 +76,7 @@ class PsuSerahTerima extends Model
         'updated_at'        => 'datetime',
 
         // scalar
-        'status_verifikasi' => 'integer',
+        'status_verifikasi_usulan' => 'integer',
 
         // jenisPSU kini JSON (array of strings)
         'jenisPSU'          => 'array',
@@ -85,7 +86,7 @@ class PsuSerahTerima extends Model
         'dokumenIzinPemanfaatan'    => 'array',
         'dokumenKondisi'            => 'array',
         'dokumenTeknis'             => 'array',
-        'ktpPengusul'               => 'array',
+        'ktpPemohon'                => 'array',
         'aktaPerusahaan'            => 'array',
         'suratPermohonanPenyerahan' => 'array',
         'dokumenSiteplan'           => 'array',

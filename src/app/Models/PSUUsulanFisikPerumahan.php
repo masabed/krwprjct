@@ -15,6 +15,7 @@ class PSUUsulanFisikPerumahan extends Model
     protected $keyType = 'string';
 
     protected $fillable = [
+        // pemohon
         'tanggalPermohonan',
         'nomorSuratPermohonan',
         'sumberUsulan',
@@ -22,28 +23,68 @@ class PSUUsulanFisikPerumahan extends Model
         'noKontakAspirator',
         'namaPIC',
         'noKontakPIC',
+
+        // rincian
         'jenisUsulan',
         'uraianMasalah',
-        'dimensiUsulan',
+
+        // dimensi
+        'dimensiUsulanUtama',
+        'dimensiUsulanTambahan',
+
+        // lokasi
         'alamatUsulan',
         'rtUsulan',
         'rwUsulan',
         'titikLokasiUsulan',
         'perumahanId',
+
+        // dokumen
         'suratPermohonanUsulanFisik',
-        'proposalUsulanFisik',
         'dokumentasiEksisting',
+
+        // meta
         'status_verifikasi_usulan',
         'pesan_verifikasi',
         'user_id',
     ];
 
     protected $casts = [
-        'suratPermohonanUsulanFisik' => 'array',
-        'proposalUsulanFisik'        => 'array',
-        'dokumentasiEksisting'       => 'array',
-        'status_verifikasi_usulan'   => 'integer',
-        'created_at'                 => 'datetime',
-        'updated_at'                 => 'datetime',
+        'tanggalPermohonan'            => 'date',
+
+        'suratPermohonanUsulanFisik'   => 'array',
+        'dokumentasiEksisting'         => 'array',
+
+        'status_verifikasi_usulan'     => 'integer',
+        'created_at'                   => 'datetime',
+        'updated_at'                   => 'datetime',
     ];
+
+    protected static function booted(): void
+    {
+        static::creating(function (self $m) {
+            // default [] untuk kolom JSON dokumen kalau null
+            foreach (['suratPermohonanUsulanFisik', 'dokumentasiEksisting'] as $f) {
+                if (!array_key_exists($f, $m->attributes) || is_null($m->{$f})) {
+                    $m->{$f} = [];
+                }
+            }
+
+            // default status verifikasi = 0 kalau belum di-set
+            if (!array_key_exists('status_verifikasi_usulan', $m->attributes)
+                || is_null($m->status_verifikasi_usulan)) {
+                $m->status_verifikasi_usulan = 0;
+            }
+        });
+    }
+
+    public function user()
+    {
+        return $this->belongsTo(\App\Models\User::class, 'user_id', 'id');
+    }
+
+    public function perumahan()
+    {
+        return $this->belongsTo(\App\Models\Perumahan::class, 'perumahanId', 'id');
+    }
 }

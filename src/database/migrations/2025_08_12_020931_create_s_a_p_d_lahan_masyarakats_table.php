@@ -33,7 +33,7 @@ return new class extends Migration {
             $table->string('titikLokasi')->nullable();
 
             // File disimpan sebagai ARRAY UUID (JSON)
-            $table->json('buktiKepemilikan')->nullable();
+            $table->json('buktiLegalitasTanah')->nullable();
             $table->json('dokumenProposal')->nullable();
             // HAPUS: $table->json('dokumenDJPM')->nullable();
             $table->json('fotoLahan')->nullable();

@@ -17,13 +17,16 @@ use App\Http\Controllers\Api\Rutilahu\RutilahuController;
 use App\Http\Controllers\Api\Rutilahu\RutilahuFileController;
 use App\Http\Controllers\Api\Permukiman\PermukimanController;
 use App\Http\Controllers\Api\Permukiman\PermukimanFileController;
+use App\Http\Controllers\Api\Pengawasan\PengawasanController;
 use App\Http\Controllers\Api\Psu\PSUSerahTerimaController;
 use App\Http\Controllers\Api\Psu\PSUUsulanFisikBSLController;
 use App\Http\Controllers\Api\Psu\PSUUsulanFisikPerumahanController;
 use App\Http\Controllers\Api\Psu\PSUUsulanFisikPJLController;
 use App\Http\Controllers\Api\Psu\PSUUsulanFisikTPUController;
+use App\Http\Controllers\Api\Pembangunan\PembangunanController;
 use App\Http\Controllers\Api\getDataPribadi\MySubmissionsController;
 use App\Http\Controllers\Api\Perencanaan\PerencanaanController;
+use App\Http\Controllers\Api\Db\PokirController;
 
 
 
@@ -53,7 +56,8 @@ Route::middleware('auth:api')->group(function () {
 //View User
 
 Route::middleware('auth:api')->group(function () {
-    Route::get('/users', [ViewUserController::class, 'index']);     // View all user Admin only
+    Route::get('/users', [ViewUserController::class, 'index']); 
+    Route::get('/users/pengawas', [ViewUserController::class, 'indexPengawas']);     // View all user Admin only
     Route::get('/profile', [ViewUserController::class, 'profile']); // View profile of the Authenticated user
     Route::get('/users/{id}', [ViewUserController::class, 'show']); //View one user by admin
     Route::delete('/users/{id}', [UserManagementController::class, 'deleteUser']); //Delete User Admin Only
@@ -62,15 +66,15 @@ Route::middleware('auth:api')->group(function () {
     Route::get('/myData', [MySubmissionsController::class, 'index']);
 });
 
-//View Data 
-
-//Route::get('/perumahan/pengawas', [ViewAllPerumahanController::class, 'getSimplifiedPerumahan']);
-//Route::get('/perumahan/getListPerumahanBidang', [ViewAllPerumahanController::class, 'getPerumahanByAdmin']);
-//Route::get('/perumahan/dashboardPerumahan', [ViewAllPerumahanController::class, 'resumeByKecamatanKelurahan']);
-
 
 Route::middleware('auth:api')->group(function () {
-    
+
+    //db_pokir
+     Route::get('/pokir', [PokirController::class, 'index']);
+    Route::get('/pokir/{uuid}', [PokirController::class, 'show']);
+    Route::post('/pokir/create', [PokirController::class, 'store']);
+    Route::post('/pokir/update/{uuid}', [PokirController::class, 'update']); // <<< pakai POST
+    Route::delete('/pokir/{uuid}', [PokirController::class, 'destroy']);
 
 //DataSanpam Individual
  Route::post('/sanpam/upload', [SAPDIndividualController::class, 'upload']);
@@ -96,7 +100,8 @@ Route::get('/sanpam/sarana-air', [SAPDLahanMasyarakatController::class, 'index']
 Route::get('/sanpam/sarana-air/{uuid}', [SAPDLahanMasyarakatController::class, 'show']);
 Route::get('/sanpam/file/{uuid}', [SAPDFileController::class, 'show'])
         ->name('sapd.file.show');
-    
+Route::get('/sanpam/file/preview/{uuid}', [SAPDFileController::class, 'preview'])
+    ->name('sapd.file.preview');
 //Data SerahTerimaPSU
    Route::post('/psu/file/upload',       [PSUSerahTerimaController::class, 'upload']);
 Route::post('/psu/serahterima/create',   [PSUSerahTerimaController::class, 'store']);
@@ -109,12 +114,48 @@ Route::delete('/psu/serahterima/{uuid}', [PSUSerahTerimaController::class, 'dest
 
 // file show: tetap
 Route::get('/psu/file/{uuid}', [PSUFileController::class, 'show'])->name('psu.file.show');
+Route::get('/psu/file/preview/{uuid}', [PSUFileController::class, 'preview'])
+    ->name('psu.file.preview');
 
 //Perencanaan
 Route::get('/perencanaan', [PerencanaanController::class, 'index']);
 Route::post('/perencanaan/create', [PerencanaanController::class, 'store']);
 Route::post('/perencanaan/update/{id}', [PerencanaanController::class, 'update']);
+
+// Upload & file endpoints (HARUS sebelum {id})
+Route::post('/perencanaan/upload', [PerencanaanController::class, 'upload']);
+Route::get('/perencanaan/file/{uuid}', [PerencanaanController::class, 'fileShow']);
+Route::delete('/perencanaan/file/{uuid}', [PerencanaanController::class, 'fileDestroy']);
+Route::post('/perencanaan/file/{uuid}/delete', [PerencanaanController::class, 'fileDestroy']); // alternatif via POST
+
+Route::delete('/perencanaan/{id}', [PerencanaanController::class, 'destroy']);
 Route::get('/perencanaan/{id}', [PerencanaanController::class, 'show']);
+
+//pembangunan
+Route::post('/pembangunan/create', [PembangunanController::class, 'store']);
+Route::post('/pembangunan/clone', [PembangunanController::class, 'storeCloneFromExisting']);
+    Route::post('/pembangunan/update/{id}', [PembangunanController::class, 'update'])->whereUuid('id');
+    Route::get('/pembangunan', [PembangunanController::class, 'index']);
+    Route::get('/pembangunan/dropdownspk', [PembangunanController::class, 'indexDedupSpk']);
+    Route::get('/pembangunan/{id}', [PembangunanController::class, 'show'])->whereUuid('id'); // optional
+
+//Pengawasan
+// Pengawasan
+Route::get('/pengawasan', [PengawasanController::class, 'index']);
+Route::get('/pengawasan/mydata', [PengawasanController::class, 'pembangunanIndexSimple']);
+
+// Uploads (temp/final + preview) — LETAKKAN SEBELUM /pengawasan/{id}
+Route::post('/pengawasan/upload', [PengawasanController::class, 'upload']);
+Route::get('/pengawasan/file/{uuid}', [PengawasanController::class, 'fileShow']);
+Route::get('/pengawasan/file/preview/{uuid}', [PengawasanController::class, 'filePreview']);
+Route::delete('/pengawasan/file/{uuid}', [PengawasanController::class, 'fileDestroy']);
+
+// CRUD Pengawasan
+Route::get('/pengawasan/{id}', [PengawasanController::class, 'show']);
+Route::post('/pengawasan/create', [PengawasanController::class, 'store']);
+Route::post('/pengawasan/update/{id}', [PengawasanController::class, 'update']);
+Route::delete('/pengawasan/{id}', [PengawasanController::class, 'destroy']);
+
 
 // PSU Usulan Fisik BSL
 Route::post('/psu/usulan-fisik-bsl/create', [PSUUsulanFisikBSLController::class, 'store']);
@@ -163,7 +204,9 @@ Route::delete('/psu/usulan-fisik-perumahan/{uuid}',       [PSUUsulanFisikPerumah
     Route::get('/perumahan',          [RutilahuController::class, 'index']);
     Route::post('/perumahan/update/{uuid}', [RutilahuController::class, 'update'])->whereUuid('uuid');
     Route::delete('/perumahan/{uuid}',      [RutilahuController::class, 'destroy'])->whereUuid('uuid');
-     Route::get('/perumahan/file/{uuid}',      [RutilahuFileController::class, 'show'])->whereUuid('uuid');
+     Route::get('/perumahan/file/{uuid}',      [RutilahuFileController::class, 'show']);
+     Route::get('/perumahan/file/preview/{uuid}', [RutilahuFileController::class, 'preview'])
+    ->name('rutilahu.file.preview');
      Route::post('/perumahan/file/delete/{uuid}', [RutilahuFileController::class, 'destroy']);
 
     //permukiman
@@ -176,6 +219,9 @@ Route::get('/permukiman', [PermukimanController::class, 'index']);
 Route::get('/permukiman/file/{uuid}', [PermukimanFileController::class, 'show'])
     ->whereUuid('uuid')
     ->name('permukiman.file.show');
+    
+Route::get('/permukiman/file/preview/{uuid}', [PermukimanFileController::class, 'preview'])
+    ->name('permukiman.file.preview');
 
 // --- terakhir: rute dinamis by UUID untuk show data ---
 Route::get('/permukiman/{uuid}', [PermukimanController::class, 'show'])

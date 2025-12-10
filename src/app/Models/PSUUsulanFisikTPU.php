@@ -48,7 +48,6 @@ class PSUUsulanFisikTPU extends Model
 
         // Dokumen pendukung (arrays of UUID)
         'suratPermohonanUsulanFisik',
-        'proposalUsulanFisik',
         'sertifikatStatusTanah',
         'dokumentasiEksisting',
 
@@ -62,9 +61,9 @@ class PSUUsulanFisikTPU extends Model
 
     protected $casts = [
         'suratPermohonanUsulanFisik' => 'array',
-        'proposalUsulanFisik'        => 'array',
         'sertifikatStatusTanah'      => 'array',
         'dokumentasiEksisting'       => 'array',
+
         'status_verifikasi_usulan'   => 'integer',
         'created_at'                 => 'datetime',
         'updated_at'                 => 'datetime',

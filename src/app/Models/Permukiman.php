@@ -40,7 +40,7 @@ class Permukiman extends Model
         'kecamatan',
         'kelurahan',
         'titik_lokasi',
-        'status_verifikasi',
+        'status_verifikasi_usulan',
         'pesan_verifikasi',
         'user_id',
 
@@ -48,7 +48,6 @@ class Permukiman extends Model
         'foto_sta0',
         'foto_sta100',
         'surat_pemohonan',
-        'proposal_usulan',
 
         'status_verifikasi',
     ];
@@ -62,6 +61,6 @@ class Permukiman extends Model
         'foto_sta0'                     => 'array',
         'foto_sta100'                   => 'array',
         'surat_pemohonan'               => 'array',
-        'proposal_usulan'               => 'array',
+        // 'proposal_usulan' dihapus
     ];
 }

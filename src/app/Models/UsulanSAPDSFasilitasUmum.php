@@ -17,43 +17,51 @@ class UsulanSAPDSFasilitasUmum extends Model
 
     protected $fillable = [
         'uuid',
-        'user_id',                // <— ditambahkan
+        'user_id',
+
+        // 🔹 Sumber & pengusul (sesuai FormData)
+        'sumberUsulan',
+        'namaAspirator',
+        'noKontakAspirator',
+
+        // Data fasilitas umum
         'namaFasilitasUmum',
         'alamatFasilitasUmum',
-        'rwFasilitasUmum',
         'rtFasilitasUmum',
+        'rwFasilitasUmum',
+        'statusKepemilikan',
+
+        // Lokasi
         'kecamatan',
         'kelurahan',
         'ukuranLahan',
-        'statusKepemilikan',
         'titikLokasi',
 
-        // File arrays (JSON, boleh null)
+        // File arrays (JSON)
         'buktiKepemilikan',
-        'proposal',
         'fotoLahan',
 
+        // Verifikasi
         'status_verifikasi_usulan',
         'pesan_verifikasi',
     ];
 
-    protected $casts = [
-        'buktiKepemilikan'         => 'array',
-        'proposal'                  => 'array',
-        'fotoLahan'                 => 'array',
-        'status_verifikasi_usulan'  => 'integer',
-        'created_at'                => 'datetime',
-        'updated_at'                => 'datetime',
+    protected $attributes = [
+        'status_verifikasi_usulan' => 0,
     ];
 
-    /* ================= Relasi ================= */
+    protected $casts = [
+        'buktiKepemilikan'        => 'array',
+        'fotoLahan'               => 'array',
+        'status_verifikasi_usulan'=> 'integer',
+        'created_at'              => 'datetime',
+        'updated_at'              => 'datetime',
+    ];
 
     public function user()
     {
         return $this->belongsTo(User::class, 'user_id', 'id');
     }
-
-    /* ================ Scope bantu ================ */
 
     public function scopeOwnedBy($query, string $userId)
     {

@@ -48,7 +48,7 @@ return new class extends Migration {
             $table->json('proposal_usulan')->nullable();
 
             // Verifikasi
-            $table->unsignedTinyInteger('status_verifikasi')->default(0);
+            $table->unsignedTinyInteger('status_verifikasi_usulan')->default(0);
             $table->string('pesan_verifikasi', 512)->nullable(); // NEW
 
             $table->timestamps();

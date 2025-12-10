@@ -3,15 +3,16 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Support\Str;
+use Illuminate\Database\Eloquent\Concerns\HasUuids;
 
-class UsulanFisikBsl extends Model
+class UsulanFisikBSL extends Model
 {
-    protected $table = 'usulan_fisik_bsl';
+    use HasUuids;
 
-    protected $primaryKey   = 'id';
-    public    $incrementing = false;
-    protected $keyType      = 'string';
+    protected $table = 'usulan_fisik_bsl';
+    protected $primaryKey = 'id';
+    public $incrementing = false;
+    protected $keyType = 'string';
 
     protected $fillable = [
         'id',
@@ -35,12 +36,14 @@ class UsulanFisikBsl extends Model
         'luasTanahTersedia',
         'luasSarana',
 
-        // Lokasi usulan
-        'jenisBSL',
+        // Lokasi usulan (kolom DB: jenisLokasi)
+        'jenisLokasi',
         'alamatCPCL',
         'rtCPCL',
         'rwCPCL',
         'titikLokasiUsulan',
+        'kecamatanUsulan',
+        'kelurahanUsulan',
 
         // Keterangan lokasi BSL
         'perumahanId',
@@ -48,44 +51,81 @@ class UsulanFisikBsl extends Model
 
         // Dokumen (JSON arrays of UUID)
         'suratPermohonanUsulanFisik',
-        'proposalUsulanFisik',
         'sertifikatStatusTanah',
         'dokumentasiEksisting',
+
+        // Status verifikasi (baru)
+        'status_verifikasi_usulan',
+        'pesan_verifikasi',
 
         // Audit
         'user_id',
     ];
 
     protected $casts = [
-        // tanggal
-        'tanggalPermohonan' => 'date',
-        'created_at'        => 'datetime',
-        'updated_at'        => 'datetime',
+        'tanggalPermohonan'          => 'date',
+        'created_at'                 => 'datetime',
+        'updated_at'                 => 'datetime',
 
-        // json arrays (nullable)
+        // JSON arrays
         'suratPermohonanUsulanFisik' => 'array',
-        'proposalUsulanFisik'        => 'array',
         'sertifikatStatusTanah'      => 'array',
         'dokumentasiEksisting'       => 'array',
+
+        // Verifikasi
+        'status_verifikasi_usulan'   => 'integer',
     ];
 
-    protected static function booted()
+    // Biar 'jenisBSL' ikut tampil di JSON/array (alias dari jenisLokasi)
+    protected $appends = ['jenisBSL'];
+
+    /**
+     * Alias field: kompatibel dengan kode lama yang pakai 'jenisBSL'
+     * sementara kolom DB adalah 'jenisLokasi'.
+     */
+    public function getJenisBslAttribute(): ?string
+    {
+        return $this->attributes['jenisLokasi'] ?? null;
+    }
+
+    public function setJenisBslAttribute($value): void
+    {
+        $this->attributes['jenisLokasi'] = $value;
+    }
+
+    protected static function booted(): void
     {
         static::creating(function (self $m) {
-            if (empty($m->id)) {
-                $m->id = (string) Str::uuid();
-            }
-            // Biar konsisten: kolom JSON default [] saat create jika belum diisi
+            // default array [] untuk kolom JSON jika null saat create
             foreach ([
                 'suratPermohonanUsulanFisik',
-                'proposalUsulanFisik',
                 'sertifikatStatusTanah',
                 'dokumentasiEksisting',
             ] as $f) {
-                if (is_null($m->{$f})) {
+                if (!array_key_exists($f, $m->attributes) || is_null($m->{$f})) {
                     $m->{$f} = [];
                 }
             }
+
+            // pastikan default status verifikasi = 0 jika tidak diisi (selaras dengan default DB)
+            if (
+                !array_key_exists('status_verifikasi_usulan', $m->attributes)
+                || is_null($m->status_verifikasi_usulan)
+            ) {
+                $m->status_verifikasi_usulan = 0;
+            }
         });
+    }
+
+    /* ================== Relationships (opsional) ================== */
+
+    public function user()
+    {
+        return $this->belongsTo(\App\Models\User::class, 'user_id', 'id');
+    }
+
+    public function perumahan()
+    {
+        return $this->belongsTo(\App\Models\Perumahan::class, 'perumahanId', 'id');
     }
 }

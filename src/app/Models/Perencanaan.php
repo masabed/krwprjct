@@ -9,25 +9,29 @@ class Perencanaan extends Model
 {
     protected $table = 'perencanaans';
 
-    // Primary key kita pakai kolom "id" bertipe string (UUID), bukan auto increment
+    // Primary key UUID (string, non-incrementing)
     protected $primaryKey = 'id';
     public $incrementing = false;
     protected $keyType = 'string';
 
-    // Kolom yang boleh di-mass assign
+    /**
+     * Kolom yang boleh di-mass assign.
+     * (Tidak perlu 'id' karena akan di-generate otomatis pada creating)
+     */
     protected $fillable = [
-        'id',            // UUID kita simpan di sini
-        'uuidUsulan',    // UUID dari usulan (relasi ke tabel usulan/rutilahu)
-        'nilaiHPS',      // string nullable
-        'catatanSurvey', // string/text nullable
+        'uuidUsulan',
+        'nilaiHPS',
+        'catatanSurvey',
+        'lembarKontrol', // JSON array of file UUIDs (FINAL)
     ];
 
     protected $casts = [
-        'created_at' => 'datetime',
-        'updated_at' => 'datetime',
+        'lembarKontrol' => 'array',
+        'created_at'    => 'datetime',
+        'updated_at'    => 'datetime',
     ];
 
-    // pas create, kalau belum ada id, generate UUID baru
+    // Generate UUID untuk kolom "id" saat create jika belum ada
     protected static function boot()
     {
         parent::boot();

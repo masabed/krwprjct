@@ -56,7 +56,7 @@ return new class extends Migration {
             
 
             // Verifikasi & audit
-            $table->unsignedTinyInteger('status_verifikasi')->default(0); // 0..4
+            $table->unsignedTinyInteger('status_verifikasi_usulan')->default(0); // 0..4
             $table->string('pesan_verifikasi', 512)->nullable();
             $table->string('user_id')->index();              // pembuat usulan
 

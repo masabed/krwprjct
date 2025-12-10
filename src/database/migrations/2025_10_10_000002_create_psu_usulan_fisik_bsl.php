@@ -32,12 +32,16 @@ return new class extends Migration {
             $table->string('luasTanahTersedia', 100)->nullable();
             $table->string('luasSarana', 100)->nullable();
 
-            // Lokasi usulan
-            $table->string('jenisBSL', 150);
+            // Lokasi usulan (UPDATED)
+            $table->string('jenisLokasi', 150); // was: jenisBSL
             $table->string('alamatCPCL', 500);
             $table->string('rtCPCL', 10)->nullable();
             $table->string('rwCPCL', 10)->nullable();
             $table->string('titikLokasiUsulan', 255);
+
+            // Wilayah tambahan (NEW)
+            $table->string('kecamatanUsulan', 150)->nullable();
+            $table->string('kelurahanUsulan', 150)->nullable();
 
             // Keterangan lokasi BSL
             $table->uuid('perumahanId')->nullable()->index();
@@ -49,10 +53,17 @@ return new class extends Migration {
             $table->json('sertifikatStatusTanah')->nullable();
             $table->json('dokumentasiEksisting')->nullable();
 
-            // Audit
+            // Audit + Verifikasi
             $table->string('user_id')->index();
+            $table->unsignedTinyInteger('status_verifikasi_usulan')->default(0)
+                ->comment('0=diajukan/baru, 1=ditinjau, 2=perlu_perbaikan, 3=ditolak, 4=diverifikasi_bidang, 5=antri_penetapan, 6=disetujui, 7=selesai/publish');
+            $table->string('pesan_verifikasi', 512)->nullable();
 
             $table->timestamps();
+
+            // (Opsional) index tambahan
+            // $table->index('created_at');
+            // $table->index('updated_at');
         });
     }
 
