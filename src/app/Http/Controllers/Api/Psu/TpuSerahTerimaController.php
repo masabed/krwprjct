@@ -3,35 +3,35 @@
 namespace App\Http\Controllers\Api\Psu;
 
 use App\Http\Controllers\Controller;
-use App\Models\PsuSerahTerima;
+use App\Models\TpuSerahTerima;
 use App\Models\PSUUploadTemp;
 use App\Models\PSUUpload;
 use App\Models\Perencanaan;
-use App\Models\Pembangunan;
-use App\Models\Pengawasan;
-use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
-class PsuSerahTerimaController extends Controller
+class TpuSerahTerimaController extends Controller
 {
-    /** Field file (array UUID) yang dikelola */
+    /** Field dokumen (array UUID) yang dikelola */
     private const FILE_FIELDS = [
-        'dokumenIzinBangunan',
-        'dokumenIzinPemanfaatan',
-        'dokumenKondisi',
-        'dokumenTeknis',
         'ktpPemohon',
         'aktaPerusahaan',
-        'suratPermohonanPenyerahan',
-        'dokumenSiteplan',
-        'salinanSertifikat',
-        // NOTE: noBASTPSU adalah STRING biasa, bukan file/UUID
+        'suratPermohonan',
+        'suratPernyataan',
+        'suratKeteranganDesa',
+        'suratIzinLingkungan',
+        'suratPelepasan',
+        'sertifikatHAT',
+        'pertekBPN',
+        'suratKeteranganLokasi', // max 2
     ];
 
-    /** POST /api/psu/upload */
+    /**
+     * POST /api/psu/tpu/upload
+     * Upload satu file ke TEMP (PSUUploadTemp) → balikin UUID temp.
+     */
     public function upload(Request $request)
     {
         $request->validate([
@@ -68,7 +68,10 @@ class PsuSerahTerimaController extends Controller
         ], 201);
     }
 
-    /** POST /api/psu/serah-terima */
+    /**
+     * POST /api/psu/tpu/serah-terima
+     * Buat data serah terima TPU baru.
+     */
     public function store(Request $request)
     {
         $user = $request->user();
@@ -76,12 +79,11 @@ class PsuSerahTerimaController extends Controller
             return response()->json(['success' => false, 'message' => 'Unauthenticated'], 401);
         }
 
-        // Normalisasi: file arrays (UUID) & jenisPSU (list string)
+        // Normalisasi: file arrays (UUID) & karakterTPU (list string)
         foreach (self::FILE_FIELDS as $f) {
             $this->normalizeUuidArrayField($request, $f);
         }
-        $this->normalizeStringArrayField($request, 'jenisPSU');
-        // noBASTPSU: string biasa → tidak dinormalisasi sebagai array
+        $this->normalizeStringArrayField($request, 'karakterTPU');
 
         $validated = $request->validate([
             'perumahanId'        => ['required', 'uuid'],
@@ -90,8 +92,6 @@ class PsuSerahTerimaController extends Controller
             'tipePengaju'        => ['sometimes', 'string', 'max:100'],
             'namaPemohon'        => ['sometimes', 'string', 'max:255'],
             'nikPemohon'         => ['sometimes', 'string', 'max:100'],
-            'noKontak'           => ['sometimes', 'string', 'max:100'],
-            'email'              => ['sometimes', 'email', 'max:255'],
 
             // Developer
             'jenisDeveloper'     => ['sometimes', 'string', 'max:100'],
@@ -100,58 +100,70 @@ class PsuSerahTerimaController extends Controller
             'rtDeveloper'        => ['sometimes', 'string', 'max:10'],
             'rwDeveloper'        => ['sometimes', 'string', 'max:10'],
 
+            // Kontak
+            'noKontak'           => ['sometimes', 'string', 'max:100'],
+            'email'              => ['sometimes', 'email', 'max:255'],
+
             // Administratif
             'tanggalPengusulan'  => ['sometimes', 'date'],
-            'tahapanPenyerahan'  => ['sometimes', 'string', 'max:100'],
-
-            // jenisPSU = array of strings (JSON)
-            'jenisPSU'           => ['sometimes', 'nullable', 'array', 'max:50'],
-            'jenisPSU.*'         => ['string', 'max:150'],
-
-            // noBASTPSU = STRING BIASA
-            'noBASTPSU'          => ['sometimes', 'nullable', 'string', 'max:255'],
-
-            'nomorSiteplan'      => ['sometimes', 'string', 'max:150'],
-            'tanggalSiteplan'    => ['sometimes', 'date'],
             'noSuratPST'         => ['sometimes', 'string', 'max:150'],
 
-            // Luasan
-            'luasKeseluruhan'    => ['sometimes', 'string', 'max:50'],
-            'luasRuangTerbangun' => ['sometimes', 'string', 'max:50'],
-            'luasRuangTerbuka'   => ['sometimes', 'string', 'max:50'],
+            // Info lokasi & karakter
+            'lokasiSama'         => ['sometimes', 'string', 'max:100'],
+            'namaTPU'            => ['sometimes', 'string', 'max:255'],
+            'jenisTPU'           => ['sometimes', 'string', 'max:150'],
+            'statusTanah'        => ['sometimes', 'string', 'max:150'],
+            'karakterTPU'        => ['sometimes', 'nullable', 'array', 'max:20'],
+            'karakterTPU.*'      => ['string', 'max:255'],
 
-            // File UUID arrays
-            'dokumenIzinBangunan'         => ['sometimes', 'nullable', 'array', 'max:10'],
-            'dokumenIzinBangunan.*'       => ['uuid'],
-            'dokumenIzinPemanfaatan'      => ['sometimes', 'nullable', 'array', 'max:10'],
-            'dokumenIzinPemanfaatan.*'    => ['uuid'],
-            'dokumenKondisi'              => ['sometimes', 'nullable', 'array', 'max:10'],
-            'dokumenKondisi.*'            => ['uuid'],
-            'dokumenTeknis'               => ['sometimes', 'nullable', 'array', 'max:10'],
-            'dokumenTeknis.*'             => ['uuid'],
-            'ktpPemohon'                  => ['sometimes', 'nullable', 'array', 'max:10'],
-            'ktpPemohon.*'                => ['uuid'],
-            'aktaPerusahaan'              => ['sometimes', 'nullable', 'array', 'max:10'],
-            'aktaPerusahaan.*'            => ['uuid'],
-            'suratPermohonanPenyerahan'   => ['sometimes', 'nullable', 'array', 'max:10'],
-            'suratPermohonanPenyerahan.*' => ['uuid'],
-            'dokumenSiteplan'             => ['sometimes', 'nullable', 'array', 'max:10'],
-            'dokumenSiteplan.*'           => ['uuid'],
-            'salinanSertifikat'           => ['sometimes', 'nullable', 'array', 'max:10'],
-            'salinanSertifikat.*'         => ['uuid'],
+            'aksesJalan'         => ['sometimes', 'string', 'max:255'],
+            'lokasiBerdekatan'   => ['sometimes', 'string', 'max:100'],
+
+            'alamatTPU'          => ['sometimes', 'string', 'max:500'],
+            'rtTPU'              => ['sometimes', 'string', 'max:10'],
+            'rwTPU'              => ['sometimes', 'string', 'max:10'],
+            'kecamatanTPU'       => ['sometimes', 'string', 'max:100'],
+            'kelurahanTPU'       => ['sometimes', 'string', 'max:100'],
+            'titikLokasi'        => ['sometimes', 'string', 'max:255'],
+
+            // Dokumen UUID arrays
+            'ktpPemohon'            => ['sometimes', 'nullable', 'array', 'max:5'],
+            'ktpPemohon.*'          => ['uuid'],
+            'aktaPerusahaan'        => ['sometimes', 'nullable', 'array', 'max:5'],
+            'aktaPerusahaan.*'      => ['uuid'],
+            'suratPermohonan'       => ['sometimes', 'nullable', 'array', 'max:5'],
+            'suratPermohonan.*'     => ['uuid'],
+            'suratPernyataan'       => ['sometimes', 'nullable', 'array', 'max:5'],
+            'suratPernyataan.*'     => ['uuid'],
+            'suratKeteranganDesa'   => ['sometimes', 'nullable', 'array', 'max:5'],
+            'suratKeteranganDesa.*' => ['uuid'],
+            'suratIzinLingkungan'   => ['sometimes', 'nullable', 'array', 'max:5'],
+            'suratIzinLingkungan.*' => ['uuid'],
+            'suratPelepasan'        => ['sometimes', 'nullable', 'array', 'max:5'],
+            'suratPelepasan.*'      => ['uuid'],
+            'sertifikatHAT'         => ['sometimes', 'nullable', 'array', 'max:5'],
+            'sertifikatHAT.*'       => ['uuid'],
+            'pertekBPN'             => ['sometimes', 'nullable', 'array', 'max:5'],
+            'pertekBPN.*'           => ['uuid'],
+            'suratKeteranganLokasi' => ['sometimes', 'nullable', 'array', 'max:2'],
+            'suratKeteranganLokasi.*'=> ['uuid'],
 
             // Verifikasi
-            'pesan_verifikasi'            => ['sometimes', 'nullable', 'string', 'max:512'],
-            'status_verifikasi_usulan'    => ['sometimes', 'integer', 'in:0,1,2,3,4'],
+            'status_verifikasi_usulan' => ['sometimes', 'integer', 'in:0,1,2,3,4,5,6,7,8,9'],
+            'pesan_verifikasi'         => ['sometimes', 'nullable', 'string', 'max:512'],
+
+            // noBASTTPU akan diisi belakangan
+            'noBASTTPU'               => ['sometimes', 'nullable', 'string', 'max:255'],
         ]);
 
-        // Finalisasi UUID hanya untuk field file yang ada di payload
+        // Finalisasi dokumen → FINAL
         $finalized = [];
         foreach (self::FILE_FIELDS as $f) {
             if (array_key_exists($f, $validated)) {
-                $finalized[$f] = (is_array($validated[$f]) && count($validated[$f]) > 0)
-                    ? $this->ensureFinalUploads($validated[$f], (string) $user->id, true)
-                    : null; // biar null di DB (nullable)
+                $arr = $validated[$f];
+                $finalized[$f] = (is_array($arr) && count($arr) > 0)
+                    ? $this->ensureFinalUploads($arr, (string) $user->id, true)
+                    : null;
             }
         }
 
@@ -159,27 +171,27 @@ class PsuSerahTerimaController extends Controller
         $payload['status_verifikasi_usulan'] = $validated['status_verifikasi_usulan'] ?? 0;
         $payload['user_id']                  = (string) $user->id;
 
-        $row = PsuSerahTerima::create($payload);
+        $row = TpuSerahTerima::create($payload);
 
         return response()->json([
             'success' => true,
-            'message' => 'Data PSU Serah Terima berhasil dibuat',
+            'message' => 'Data Serah Terima TPU berhasil dibuat',
             'data'    => $row,
         ], 201);
     }
 
-    /** POST/PUT/PATCH /api/psu/serah-terima/{id} */
+    /**
+     * POST/PUT/PATCH /api/psu/tpu/serah-terima/{id}
+     * Update partial (mirip PsuSerahTerimaController::update).
+     */
     public function update(Request $request, ?string $id = null)
     {
-        // Ambil id dari berbagai kemungkinan route param / body
         $id = $id
             ?? $request->route('id')
-            ?? $request->route('psuId')
-            ?? $request->route('psu_serah_terima')
             ?? $request->input('id');
 
-        // Validasi id harus UUID
-        if (!is_string($id) || !preg_match('/^[0-9a-fA-F]{8}\-[0-9a-fA-F]{4}\-[0-9a-fA-F]{4}\-[0-9a-fA-F]{4}\-[0-9a-fA-F]{12}$/', $id)) {
+        if (!is_string($id) ||
+            !preg_match('/^[0-9a-fA-F]{8}\-[0-9a-fA-F]{4}\-[0-9a-fA-F]{4}\-[0-9a-fA-F]{4}\-[0-9a-fA-F]{12}$/', $id)) {
             return response()->json([
                 'success'     => false,
                 'message'     => 'Parameter id tidak valid (harus UUID).',
@@ -187,7 +199,7 @@ class PsuSerahTerimaController extends Controller
             ], 422);
         }
 
-        $row = PsuSerahTerima::query()->where('id', strtolower($id))->first();
+        $row = TpuSerahTerima::query()->where('id', strtolower($id))->first();
         if (!$row) {
             return response()->json([
                 'success'      => false,
@@ -201,100 +213,99 @@ class PsuSerahTerimaController extends Controller
             return response()->json(['success' => false, 'message' => 'Unauthenticated'], 401);
         }
 
-        // Normalisasi input yang dikirim saja (file & jenisPSU)
+        // Normalisasi input yang dikirim saja
         foreach (self::FILE_FIELDS as $f) {
             if ($request->has($f)) {
                 $this->normalizeUuidArrayField($request, $f);
             }
         }
-        if ($request->has('jenisPSU')) {
-            $this->normalizeStringArrayField($request, 'jenisPSU');
+        if ($request->has('karakterTPU')) {
+            $this->normalizeStringArrayField($request, 'karakterTPU');
         }
-        // TIDAK menormalisasi noBASTPSU (string apa adanya)
 
         $validated = $request->validate([
             'perumahanId'        => ['sometimes', 'uuid'],
 
-            // Pemohon
             'tipePengaju'        => ['sometimes', 'string', 'max:100'],
             'namaPemohon'        => ['sometimes', 'string', 'max:255'],
             'nikPemohon'         => ['sometimes', 'string', 'max:100'],
-            'noKontak'           => ['sometimes', 'string', 'max:100'],
-            'email'              => ['sometimes', 'email', 'max:255'],
 
-            // Developer
             'jenisDeveloper'     => ['sometimes', 'string', 'max:100'],
             'namaDeveloper'      => ['sometimes', 'string', 'max:255'],
             'alamatDeveloper'    => ['sometimes', 'string', 'max:500'],
             'rtDeveloper'        => ['sometimes', 'string', 'max:10'],
             'rwDeveloper'        => ['sometimes', 'string', 'max:10'],
 
-            // Administratif
+            'noKontak'           => ['sometimes', 'string', 'max:100'],
+            'email'              => ['sometimes', 'email', 'max:255'],
+
             'tanggalPengusulan'  => ['sometimes', 'date'],
-            'tahapanPenyerahan'  => ['sometimes', 'string', 'max:100'],
-
-            // jenisPSU array of strings (JSON)
-            'jenisPSU'           => ['sometimes', 'nullable', 'array', 'max:50'],
-            'jenisPSU.*'         => ['string', 'max:150'],
-
-            // noBASTPSU = STRING BIASA
-            'noBASTPSU'          => ['sometimes', 'nullable', 'string', 'max:255'],
-
-            'nomorSiteplan'      => ['sometimes', 'string', 'max:150'],
-            'tanggalSiteplan'    => ['sometimes', 'date'],
             'noSuratPST'         => ['sometimes', 'string', 'max:150'],
 
-            // Luasan
-            'luasKeseluruhan'    => ['sometimes', 'string', 'max:50'],
-            'luasRuangTerbangun' => ['sometimes', 'string', 'max:50'],
-            'luasRuangTerbuka'   => ['sometimes', 'string', 'max:50'],
+            'lokasiSama'         => ['sometimes', 'string', 'max:100'],
+            'namaTPU'            => ['sometimes', 'string', 'max:255'],
+            'jenisTPU'           => ['sometimes', 'string', 'max:150'],
+            'statusTanah'        => ['sometimes', 'string', 'max:150'],
+            'karakterTPU'        => ['sometimes', 'nullable', 'array', 'max:20'],
+            'karakterTPU.*'      => ['string', 'max:255'],
 
-            // File UUID arrays
-            'dokumenIzinBangunan'         => ['sometimes', 'nullable', 'array', 'max:10'],
-            'dokumenIzinBangunan.*'       => ['uuid'],
-            'dokumenIzinPemanfaatan'      => ['sometimes', 'nullable', 'array', 'max:10'],
-            'dokumenIzinPemanfaatan.*'    => ['uuid'],
-            'dokumenKondisi'              => ['sometimes', 'nullable', 'array', 'max:10'],
-            'dokumenKondisi.*'            => ['uuid'],
-            'dokumenTeknis'               => ['sometimes', 'nullable', 'array', 'max:10'],
-            'dokumenTeknis.*'             => ['uuid'],
-            'ktpPemohon'                  => ['sometimes', 'nullable', 'array', 'max:10'],
-            'ktpPemohon.*'                => ['uuid'],
-            'aktaPerusahaan'              => ['sometimes', 'nullable', 'array', 'max:10'],
-            'aktaPerusahaan.*'            => ['uuid'],
-            'suratPermohonanPenyerahan'   => ['sometimes', 'nullable', 'array', 'max:10'],
-            'suratPermohonanPenyerahan.*' => ['uuid'],
-            'dokumenSiteplan'             => ['sometimes', 'nullable', 'array', 'max:10'],
-            'dokumenSiteplan.*'           => ['uuid'],
-            'salinanSertifikat'           => ['sometimes', 'nullable', 'array', 'max:10'],
-            'salinanSertifikat.*'         => ['uuid'],
+            'aksesJalan'         => ['sometimes', 'string', 'max:255'],
+            'lokasiBerdekatan'   => ['sometimes', 'string', 'max:100'],
 
-            // Verifikasi
-            'status_verifikasi_usulan'    => ['sometimes', 'integer', 'in:0,1,2,3,4,5,6,7,8,9'],
-            'pesan_verifikasi'            => ['sometimes', 'nullable', 'string', 'max:512'],
+            'alamatTPU'          => ['sometimes', 'string', 'max:500'],
+            'rtTPU'              => ['sometimes', 'string', 'max:10'],
+            'rwTPU'              => ['sometimes', 'string', 'max:10'],
+            'kecamatanTPU'       => ['sometimes', 'string', 'max:100'],
+            'kelurahanTPU'       => ['sometimes', 'string', 'max:100'],
+            'titikLokasi'        => ['sometimes', 'string', 'max:255'],
+
+            // Dokumen
+            'ktpPemohon'            => ['sometimes', 'nullable', 'array', 'max:5'],
+            'ktpPemohon.*'          => ['uuid'],
+            'aktaPerusahaan'        => ['sometimes', 'nullable', 'array', 'max:5'],
+            'aktaPerusahaan.*'      => ['uuid'],
+            'suratPermohonan'       => ['sometimes', 'nullable', 'array', 'max:5'],
+            'suratPermohonan.*'     => ['uuid'],
+            'suratPernyataan'       => ['sometimes', 'nullable', 'array', 'max:5'],
+            'suratPernyataan.*'     => ['uuid'],
+            'suratKeteranganDesa'   => ['sometimes', 'nullable', 'array', 'max:5'],
+            'suratKeteranganDesa.*' => ['uuid'],
+            'suratIzinLingkungan'   => ['sometimes', 'nullable', 'array', 'max:5'],
+            'suratIzinLingkungan.*' => ['uuid'],
+            'suratPelepasan'        => ['sometimes', 'nullable', 'array', 'max:5'],
+            'suratPelepasan.*'      => ['uuid'],
+            'sertifikatHAT'         => ['sometimes', 'nullable', 'array', 'max:5'],
+            'sertifikatHAT.*'       => ['uuid'],
+            'pertekBPN'             => ['sometimes', 'nullable', 'array', 'max:5'],
+            'pertekBPN.*'           => ['uuid'],
+            'suratKeteranganLokasi' => ['sometimes', 'nullable', 'array', 'max:2'],
+            'suratKeteranganLokasi.*'=> ['uuid'],
+
+            'status_verifikasi_usulan' => ['sometimes', 'integer', 'in:0,1,2,3,4,5,6,7,8,9'],
+            'pesan_verifikasi'         => ['sometimes', 'nullable', 'string', 'max:512'],
+            'noBASTTPU'                => ['sometimes', 'nullable', 'string', 'max:255'],
         ]);
 
-        // Proses file arrays yang dikirim
+        // Proses dokumen
         foreach (self::FILE_FIELDS as $f) {
             if (!array_key_exists($f, $validated)) {
                 continue;
             }
 
-            // null → abaikan (tidak overwrite kolom file)
+            // null → abaikan (tidak overwrite)
             if (is_null($validated[$f])) {
                 unset($validated[$f]);
                 continue;
             }
 
-            // Pastikan file FINAL (pindahkan dari temp jika perlu) + dedup
             $incomingFinal = (is_array($validated[$f]) && count($validated[$f]) > 0)
                 ? $this->ensureFinalUploads($validated[$f], (string) $user->id, true)
                 : [];
 
-            // Hapus file FINAL yang tidak lagi ada
             $old     = $row->getAttribute($f) ?? [];
             $old     = is_array($old) ? $old : [];
             $removed = array_values(array_diff($old, $incomingFinal));
+
             if (!empty($removed)) {
                 $this->deleteFinalUploads($removed);
             }
@@ -302,16 +313,15 @@ class PsuSerahTerimaController extends Controller
             $validated[$f] = $incomingFinal ?: null;
         }
 
-        // Isi field biasa dulu
+        // Isi field biasa
         $row->fill($validated);
 
-        // AUTO-CLEAR: setiap kali status ≥ 4, kosongkan pesan_verifikasi
+        // Auto-clear pesan saat status >= 4
         if ($request->has('status_verifikasi_usulan')
             && (int) $request->input('status_verifikasi_usulan') >= 4) {
             $row->pesan_verifikasi = null;
         }
 
-        // Hitung perubahan SETELAH auto-clear
         $dirty = $row->getDirty();
 
         if (empty($dirty)) {
@@ -332,75 +342,71 @@ class PsuSerahTerimaController extends Controller
         ]);
     }
 
-    /** GET /api/psu/serah-terima/{id} */
-   public function show(string $id)
-{
-    // 0) Auth
-    $auth = auth()->user();
-    if (!$auth) {
+    /**
+     * GET /api/psu/tpu/serah-terima/{id}
+     * Return: { usulan: TPU, perencanaan: [ ... ] }
+     */
+    public function show(string $id)
+    {
+        $auth = auth()->user();
+        if (!$auth) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthenticated',
+            ], 401);
+        }
+
+        $data = TpuSerahTerima::find($id);
+        if (!$data) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Data tidak ditemukan',
+            ], 404);
+        }
+
+        $role    = strtolower((string) ($auth->role ?? ''));
+        $isOwner = (string) ($data->user_id ?? '') === (string) $auth->id;
+        $isPriv  = in_array($role, ['admin', 'admin_bidang', 'operator', 'pengawas'], true);
+
+        if (!$isPriv && !$isOwner) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized',
+            ], 403);
+        }
+
+        // Ambil Perencanaan di mana uuidUsulan = id TPU ini
+        $perencanaanRows = Perencanaan::where('uuidUsulan', $id)
+            ->orderBy('created_at', 'desc')
+            ->get();
+
+        $perencanaanList = $perencanaanRows->map(function ($row) {
+            return [
+                'uuidPerencanaan' => (string) $row->id,
+                'uuidUsulan'      => (string) $row->uuidUsulan,
+                'nilaiHPS'        => $row->nilaiHPS,
+                'lembarKontrol'   => $row->lembarKontrol,
+                'dokumentasi'     => $row->dokumentasi ?? [],
+                'catatanSurvey'   => $row->catatanSurvey,
+                'created_at'      => $row->created_at,
+                'updated_at'      => $row->updated_at,
+            ];
+        })->values();
+
         return response()->json([
-            'success' => false,
-            'message' => 'Unauthenticated',
-        ], 401);
+            'success' => true,
+            'data'    => [
+                'usulan'      => $data->toArray(),
+                'perencanaan' => $perencanaanList,
+            ],
+        ]);
     }
 
-    // 1) Ambil data utama PSU Serah Terima
-    $data = PsuSerahTerima::find($id);
-    if (!$data) {
-        return response()->json([
-            'success' => false,
-            'message' => 'Data tidak ditemukan',
-        ], 404);
-    }
-
-    // 1b) Access control
-    $role    = strtolower((string) ($auth->role ?? ''));
-    $isOwner = (string) ($data->user_id ?? '') === (string) $auth->id;
-
-    // role yang dianggap privileged:
-    // - admin (legacy)
-    // - admin_bidang
-    // - operator
-    // - pengawas
-    $isPriv  = in_array($role, ['admin','admin_bidang','operator','pengawas'], true);
-
-    if (!$isPriv && !$isOwner) {
-        return response()->json([
-            'success' => false,
-            'message' => 'Unauthorized',
-        ], 403);
-    }
-
-    // 2) Perencanaan untuk usulan ini (uuidUsulan = id serah terima)
-    $perencanaanRows = Perencanaan::where('uuidUsulan', $id)
-        ->orderBy('created_at', 'desc')
-        ->get();
-
-    $perencanaanList = $perencanaanRows->map(function ($row) {
-        return [
-            'uuidPerencanaan' => (string) $row->id,
-            'uuidUsulan'      => (string) $row->uuidUsulan,
-            'nilaiHPS'        => $row->nilaiHPS,
-            'lembarKontrol'   => $row->lembarKontrol,
-            'dokumentasi'     => $row->dokumentasi, // field baru dokumentasi (array UUID gambar)
-            'catatanSurvey'   => $row->catatanSurvey,
-            'created_at'      => $row->created_at,
-            'updated_at'      => $row->updated_at,
-        ];
-    })->values();
-
-    // 3) RESPONSE: usulan + perencanaan saja
-    return response()->json([
-        'success' => true,
-        'data'    => [
-            'usulan'      => $data->toArray(),
-            'perencanaan' => $perencanaanList,
-        ],
-    ]);
-}
-
-
-    /** GET /api/psu/serah-terima */
+    /**
+     * GET /api/psu/tpu/serah-terima
+     * Admin/admin_bidang: lihat semua.
+     * User biasa: hanya data miliknya.
+     */
     public function index(Request $request)
     {
         $user = $request->user();
@@ -411,17 +417,16 @@ class PsuSerahTerimaController extends Controller
         $role    = strtolower((string) ($user->role ?? ''));
         $isAdmin = in_array($role, ['admin', 'admin_bidang'], true);
 
-        $q = PsuSerahTerima::query()->latest();
+        $q = TpuSerahTerima::query()->latest();
 
-        // User biasa hanya melihat data miliknya
         if (!$isAdmin) {
             $q->where('user_id', (string) $user->id);
         }
 
-        // Filter opsional
         if ($request->has('status_verifikasi_usulan')) {
             $q->where('status_verifikasi_usulan', (int) $request->query('status_verifikasi_usulan'));
         }
+
         if ($request->has('perumahanId')) {
             $q->where('perumahanId', $request->query('perumahanId'));
         }
@@ -432,7 +437,9 @@ class PsuSerahTerimaController extends Controller
         ]);
     }
 
-    /** DELETE /api/psu/serah-terima/{id} */
+    /**
+     * DELETE /api/psu/tpu/serah-terima/{id}
+     */
     public function destroy(string $id)
     {
         $user = auth()->user();
@@ -440,19 +447,19 @@ class PsuSerahTerimaController extends Controller
             return response()->json(['success' => false, 'message' => 'Unauthenticated'], 401);
         }
 
-        $row = PsuSerahTerima::find($id);
+        $row = TpuSerahTerima::find($id);
         if (!$row) {
             return response()->json(['success' => false, 'message' => 'Data tidak ditemukan'], 404);
         }
 
-        // Hanya admin/admin_bidang atau pemilik data yang boleh hapus
         $role    = strtolower((string) ($user->role ?? ''));
         $isAdmin = in_array($role, ['admin', 'admin_bidang'], true);
+
         if (!$isAdmin && (string) $row->user_id !== (string) $user->id) {
             return response()->json(['success' => false, 'message' => 'Forbidden'], 403);
         }
 
-        // Hapus file fisik FINAL untuk semua field file array
+        // Hapus file FINAL di semua field dokumen
         foreach (self::FILE_FIELDS as $f) {
             $uuids = $row->getAttribute($f) ?? [];
             if (is_array($uuids) && !empty($uuids)) {
@@ -490,7 +497,6 @@ class PsuSerahTerimaController extends Controller
         if (is_string($val)) {
             $t = trim($val);
 
-            // JSON string "[...]" 
             if ($t !== '' && $t[0] === '[') {
                 $arr   = json_decode($t, true);
                 $uuids = is_array($arr) ? $this->filterUuidArray($arr) : [];
@@ -498,7 +504,6 @@ class PsuSerahTerimaController extends Controller
                 return;
             }
 
-            // "uuid1,uuid2,..."
             if (str_contains($t, ',')) {
                 $parts = array_map('trim', explode(',', $t));
                 $uuids = $this->filterUuidArray($parts);
@@ -506,7 +511,6 @@ class PsuSerahTerimaController extends Controller
                 return;
             }
 
-            // Single UUID string
             $u = $this->extractUuid($t);
             $request->merge([$field => $u ? [$u] : null]);
         }
@@ -535,7 +539,6 @@ class PsuSerahTerimaController extends Controller
         if (is_string($val)) {
             $t = trim($val);
 
-            // JSON string
             if ($t !== '' && $t[0] === '[') {
                 $arr = json_decode($t, true);
                 $arr = is_array($arr) ? $arr : [];
@@ -547,7 +550,6 @@ class PsuSerahTerimaController extends Controller
                 return;
             }
 
-            // Comma separated
             if (str_contains($t, ',')) {
                 $parts = array_map('trim', explode(',', $t));
                 $arr   = array_values(array_filter($parts, fn($v) => $v !== ''));
@@ -555,7 +557,6 @@ class PsuSerahTerimaController extends Controller
                 return;
             }
 
-            // Single string
             $request->merge([$field => [$t]]);
         }
     }
@@ -584,9 +585,6 @@ class PsuSerahTerimaController extends Controller
         return null;
     }
 
-    /**
-     * Pastikan semua UUID mengarah ke file FINAL (pindah dari temp jika perlu).
-     */
     private function ensureFinalUploads(array $uuids, string $currentUserId, bool $strict = true): array
     {
         $uuids = array_values(array_unique(array_filter($uuids)));
@@ -600,7 +598,6 @@ class PsuSerahTerimaController extends Controller
         $invalid = [];
 
         foreach ($uuids as $u) {
-            // Sudah FINAL
             if ($final->has($u)) {
                 $row = $final->get($u);
                 if (!$disk->exists($row->file_path)) {
@@ -611,7 +608,6 @@ class PsuSerahTerimaController extends Controller
                 continue;
             }
 
-            // Masih TEMP → pindahkan ke FINAL
             if ($temps->has($u)) {
                 $temp = $temps->get($u);
                 if (!$disk->exists($temp->file_path)) {
@@ -619,7 +615,7 @@ class PsuSerahTerimaController extends Controller
                     continue;
                 }
 
-                $filename = basename($temp->file_path); // {uuid}.ext
+                $filename = basename($temp->file_path);
                 $ext      = pathinfo($filename, PATHINFO_EXTENSION);
                 $newName  = $filename;
                 $newPath  = 'psu_final/' . $newName;
@@ -650,7 +646,6 @@ class PsuSerahTerimaController extends Controller
                 continue;
             }
 
-            // Tidak ketemu di FINAL maupun TEMP
             $invalid[] = $u;
         }
 
@@ -665,9 +660,6 @@ class PsuSerahTerimaController extends Controller
         return array_values(array_unique($result));
     }
 
-    /**
-     * Hapus file FINAL (storage + row PSUUpload).
-     */
     private function deleteFinalUploads(array $uuids): void
     {
         $uuids = array_values(array_unique(array_filter($uuids)));

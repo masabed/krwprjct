@@ -32,6 +32,7 @@ class PerumahanDb extends Model
         // STRING biasa (nullable)
         'bastTPU',
 
+        // status 0–4
         'status_serah_terima',
         'pesan_verifikasi', // nullable
     ];
@@ -43,7 +44,6 @@ class PerumahanDb extends Model
     protected $casts = [
         'foto_gerbang'        => 'array',
         'fileSerahTerimaTPU'  => 'array',
-        // bastTPU: string nullable (jangan di-cast)
         'status_serah_terima' => 'integer',
         'created_at'          => 'datetime',
         'updated_at'          => 'datetime',
@@ -57,24 +57,28 @@ class PerumahanDb extends Model
             if (empty($model->id)) {
                 $model->id = (string) Str::uuid();
             }
-            // Pastikan kolom array tidak null saat create (biar tampil sebagai [])
+
+            // Pastikan kolom array tidak null saat create (biar di response keluar [])
             foreach (['foto_gerbang', 'fileSerahTerimaTPU'] as $field) {
                 if (is_null($model->{$field})) {
                     $model->{$field} = [];
                 }
             }
-            // bastTPU biarkan null jika tidak diisi (string)
         });
     }
 
-    /** ====== STATUS SERAH TERIMA disimpan/tampil sebagai 0/1 ====== */
-    public function getStatusSerahTerimaAttribute($value): int
-    {
-        return (int) $value;
-    }
-
+    /**
+     * STATUS SERAH TERIMA: integer 0–4
+     */
     public function setStatusSerahTerimaAttribute($value): void
     {
-        $this->attributes['status_serah_terima'] = (int) filter_var($value, FILTER_VALIDATE_BOOLEAN);
+        $int = (int) $value;
+
+        // Batasi ke 0–4 (kalau di luar range, fallback ke 0)
+        if ($int < 0 || $int > 4) {
+            $int = 0;
+        }
+
+        $this->attributes['status_serah_terima'] = $int;
     }
 }

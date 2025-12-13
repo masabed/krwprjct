@@ -22,7 +22,8 @@ class User extends Authenticatable implements JWTSubject
         'email',
         'password',
         'role',
-        'avatar_path', // <— tambahkan
+        'noHP',      // nomor HP user
+        'avatar_path',  // path file avatar di disk public
     ];
 
     protected $hidden = [
@@ -32,7 +33,7 @@ class User extends Authenticatable implements JWTSubject
 
     protected $casts = [
         'email_verified_at' => 'datetime',
-        'password' => 'hashed',
+        'password'          => 'hashed',
     ];
 
     protected static function booted(): void

@@ -59,47 +59,52 @@ class PermukimanController extends Controller
     /**
      * GET /permukiman (list + filter)
      */
-    public function index(Request $request)
-    {
-        $user = auth()->user();
-        if (!$user) {
-            return response()->json(['success' => false, 'message' => 'Unauthenticated'], 401);
-        }
-
-        // Admin & admin_bidang bisa lihat semua
-        $role    = strtolower((string) ($user->role ?? ''));
-        $isAdmin = in_array($role, ['admin', 'admin_bidang'], true);
-
-        $q = Permukiman::query();
-
-        // User biasa hanya melihat data miliknya
-        if (!$isAdmin) {
-            $q->where('user_id', (string) $user->id);
-        }
-
-        // Filter status (opsional)
-        if ($request->filled('status')) {
-            $q->where('status_verifikasi_usulan', (int) $request->input('status'));
-        }
-
-        // Pencarian (opsional)
-        if ($request->filled('search')) {
-            $s = trim((string) $request->input('search'));
-            $q->where(function ($qq) use ($s) {
-                $qq->where('nama_pengusul', 'like', "%{$s}%")
-                   ->orWhere('instansi', 'like', "%{$s}%")
-                   ->orWhere('jenis_usulan', 'like', "%{$s}%");
-            });
-        }
-
-        $data = $q->latest()->get();
-
-        return response()->json([
-            'success' => true,
-            'count'   => $data->count(),
-            'data'    => $data,
-        ]);
+   public function index(Request $request)
+{
+    $user = auth()->user();
+    if (!$user) {
+        return response()->json(['success' => false, 'message' => 'Unauthenticated'], 401);
     }
+
+    // Role check
+    $role = strtolower((string) ($user->role ?? ''));
+
+    // Role yang boleh lihat semua data:
+    // - admin
+    // - admin_bidang
+    // - operator
+    $canSeeAll = in_array($role, ['admin', 'admin_bidang', 'operator'], true);
+
+    $q = Permukiman::query();
+
+    // Kalau BUKAN admin/admin_bidang/operator → hanya lihat data miliknya (user biasa)
+    if (!$canSeeAll) {
+        $q->where('user_id', (string) $user->id);
+    }
+
+    // Filter status (opsional)
+    if ($request->filled('status')) {
+        $q->where('status_verifikasi_usulan', (int) $request->input('status'));
+    }
+
+    // Pencarian (opsional)
+    if ($request->filled('search')) {
+        $s = trim((string) $request->input('search'));
+        $q->where(function ($qq) use ($s) {
+            $qq->where('nama_pengusul', 'like', "%{$s}%")
+               ->orWhere('instansi', 'like', "%{$s}%")
+               ->orWhere('jenis_usulan', 'like', "%{$s}%");
+        });
+    }
+
+    $data = $q->latest()->get();
+
+    return response()->json([
+        'success' => true,
+        'count'   => $data->count(),
+        'data'    => $data,
+    ]);
+}
 
     /**
      * GET /permukiman/{id} (detail by PK string)
@@ -139,6 +144,7 @@ class PermukimanController extends Controller
                 'uuidPerencanaan' => (string) $row->id,
                 'uuidUsulan'      => (string) $row->uuidUsulan,
                 'nilaiHPS'        => $row->nilaiHPS,
+                'dokumentasi'     => $p->dokumentasi ?? [],
                 'lembarKontrol'   => $row->lembarKontrol,
                 'catatanSurvey'   => $row->catatanSurvey,
                 'created_at'      => $row->created_at,

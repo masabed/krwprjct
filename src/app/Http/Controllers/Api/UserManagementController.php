@@ -29,7 +29,10 @@ class UserManagementController extends Controller
 
     /**
      * PATCH /api/users/{id}
-     * Update profil user (admin bisa siapa pun; user biasa hanya dirinya).
+     * Update profil user.
+     * - Admin / admin_bidang bisa update user mana pun (termasuk password, tanpa old_password).
+     * - User biasa hanya bisa update dirinya sendiri.
+     *   Jika ingin ganti password, wajib kirim old_password yang benar.
      * {id} bisa "me" atau UUID.
      */
     public function update(Request $request, string $id)
@@ -39,41 +42,104 @@ class UserManagementController extends Controller
             return response()->json(['error' => 'Unauthenticated.'], 401);
         }
 
-        $target = $this->resolveTargetUser($actor, $id);
-        if ($target instanceof \Illuminate\Http\JsonResponse) {
-            return $target; // return 404/403 json dari helper
+        // Normalisasi noHP -> no_hp
+        if ($request->has('noHP') && !$request->has('no_hp')) {
+            $request->merge(['no_hp' => $request->input('noHP')]);
         }
 
-        $isAdmin = $actor->role === 'admin';
+        $target = $this->resolveTargetUser($actor, $id);
+        if ($target instanceof \Illuminate\Http\JsonResponse) {
+            return $target; // bisa 404 / 403 dari helper
+        }
 
+        $isAdmin = in_array($actor->role, ['admin', 'admin_bidang'], true);
+
+        // ---------- RULES DASAR ----------
         $rules = [
             'name'          => ['sometimes','string','max:255'],
-            'username'      => ['sometimes','alpha_dash', Rule::unique('users','username')->ignore($target->id, 'id')],
-            'email'         => ['sometimes','email', Rule::unique('users','email')->ignore($target->id, 'id')],
+            'username'      => [
+                'sometimes',
+                'alpha_dash',
+                Rule::unique('users','username')->ignore($target->id, 'id'),
+            ],
+            'email'         => [
+                'sometimes',
+                'nullable',
+                'email',
+                Rule::unique('users','email')->ignore($target->id, 'id'),
+            ],
+            'no_hp'         => ['sometimes','nullable','string','max:30'],
             'avatar'        => ['sometimes','file','image','mimes:jpg,jpeg,png,webp','max:2048'],
             'delete_avatar' => ['sometimes','boolean'],
         ];
+
+        // ---------- ROLE (HANYA ADMIN / ADMIN_BIDANG) ----------
         if ($isAdmin) {
-            $rules['role'] = ['sometimes','string','in:admin,pengawas,user'];
+            $rules['role'] = ['sometimes','string','in:admin,admin_bidang,operator,pengawas,user'];
         }
 
-        $validator = Validator::make($request->all(), $rules);
+        // ---------- PASSWORD RULES ----------
+        // Admin: boleh ganti password tanpa old_password
+        $rules['password'] = [
+            'sometimes',
+            'string',
+            'min:8',
+            'regex:/[A-Z]/',
+            'regex:/[0-9]/',
+            'confirmed',
+        ];
+        $rules['password_confirmation'] = [
+            'required_with:password',
+            'string',
+            'min:8',
+        ];
+
+        if (!$isAdmin) {
+            // User biasa: kalau ganti password, wajib old_password
+            $rules['old_password'] = [
+                'required_with:password',
+                'string',
+            ];
+        }
+
+        $validator = Validator::make($request->all(), $rules, [
+            'password.regex' => 'Password must contain at least one capital letter and one number.',
+        ]);
+
         if ($validator->fails()) {
             return response()->json(['errors' => $validator->errors()], 422);
         }
 
         $dirty = [];
 
-        if ($request->has('name'))     { $target->name = $request->name;         $dirty[] = 'name'; }
-        if ($request->has('username')) { $target->username = $request->username; $dirty[] = 'username'; }
-        if ($request->has('email'))    { $target->email = $request->email;       $dirty[] = 'email'; }
+        // ---------- UPDATE FIELD PROFIL ----------
+        if ($request->has('name')) {
+            $target->name = $request->name;
+            $dirty[] = 'name';
+        }
 
+        if ($request->has('username')) {
+            $target->username = $request->username;
+            $dirty[] = 'username';
+        }
+
+        if ($request->has('email')) {
+            $target->email = $request->email;
+            $dirty[] = 'email';
+        }
+
+        if ($request->has('no_hp')) {
+            $target->no_hp = $request->no_hp;
+            $dirty[] = 'no_hp';
+        }
+
+        // ROLE hanya boleh diubah admin / admin_bidang
         if ($isAdmin && $request->has('role')) {
             $target->role = $request->role;
             $dirty[] = 'role';
         }
 
-        // Hapus avatar
+        // ---------- AVATAR ----------
         if ($request->boolean('delete_avatar')) {
             if ($target->avatar_path && Storage::disk('public')->exists($target->avatar_path)) {
                 Storage::disk('public')->delete($target->avatar_path);
@@ -82,17 +148,38 @@ class UserManagementController extends Controller
             $dirty[] = 'avatar';
         }
 
-        // Ganti avatar
         if ($request->hasFile('avatar')) {
             if ($target->avatar_path && Storage::disk('public')->exists($target->avatar_path)) {
                 Storage::disk('public')->delete($target->avatar_path);
             }
-            $ext      = strtolower($request->file('avatar')->getClientOriginalExtension() ?: $request->file('avatar')->extension() ?: 'jpg');
+
+            $ext      = strtolower(
+                $request->file('avatar')->getClientOriginalExtension()
+                ?: $request->file('avatar')->extension()
+                ?: 'jpg'
+            );
             $filename = 'avatar-'.Str::uuid().'.'.$ext;
             $path     = $request->file('avatar')->storeAs('avatars/'.$target->id, $filename, 'public');
 
             $target->avatar_path = $path;
             $dirty[] = 'avatar';
+        }
+
+        // ---------- PASSWORD ----------
+        if ($request->filled('password')) {
+            if (!$isAdmin) {
+                if (
+                    !$request->filled('old_password') ||
+                    !Hash::check($request->old_password, $target->password)
+                ) {
+                    return response()->json([
+                        'error' => 'Old password is incorrect.',
+                    ], 403);
+                }
+            }
+
+            $target->password = Hash::make($request->password);
+            $dirty[] = 'password';
         }
 
         if (!empty($dirty)) {
@@ -107,6 +194,7 @@ class UserManagementController extends Controller
                 'name'       => $target->name,
                 'username'   => $target->username,
                 'email'      => $target->email,
+                'no_hp'      => $target->no_hp,
                 'role'       => $target->role,
                 'avatar_url' => $target->avatar_url ?? null,
                 'updated_at' => $target->updated_at,
@@ -115,67 +203,13 @@ class UserManagementController extends Controller
     }
 
     /**
-     * PATCH /api/users/{id}/password
-     * Update password (admin bebas; user biasa butuh old_password).
-     * {id} bisa "me" atau UUID.
-     */
-    public function updatePassword(Request $request, string $id)
-{
-    $actor = auth('api')->user();
-    if (!$actor) {
-        return response()->json(['error' => 'Unauthenticated.'], 401);
-    }
-
-    $target = $this->resolveTargetUser($actor, $id);
-    if ($target instanceof \Illuminate\Http\JsonResponse) {
-        return $target; // return 404/403 json dari helper
-    }
-
-    $isAdmin = $actor->role === 'admin';
-    $isSelf  = $actor->id === $target->id;
-
-    $rules = [
-        'password'              => ['required','string','min:8','regex:/[A-Z]/','regex:/[0-9]/','confirmed'],
-        'password_confirmation' => ['required','string','min:8'],
-    ];
-    if (!$isAdmin || $isSelf) {
-        $rules['old_password'] = ['required','string'];
-    }
-
-    $validator = \Validator::make($request->all(), $rules, [
-        'password.regex' => 'Password must contain at least one capital letter and one number.',
-    ]);
-    if ($validator->fails()) {
-        return response()->json(['errors' => $validator->errors()], 422);
-    }
-
-    if ((!$isAdmin || $isSelf) && !\Hash::check($request->old_password, $target->password)) {
-        return response()->json(['error' => 'Old password is incorrect.'], 403);
-    }
-
-    $target->password = bcrypt($request->password);
-    $target->save();
-
-    // Pesan sesuai permintaan: "Username {USERNAME} Berhasil Update Password"
-    $msg = 'Berhasil Update Password';
-
-    return response()->json([
-        'success'  => true,
-        'message'  => $msg,
-        'user_id'  => $target->id,
-        'username' => $target->username,
-    ]);
-}
-
-
-    /**
      * DELETE /api/users/{id}
-     * Hapus user (admin only). Mendukung id="me" (tetapi admin dicegah hapus dirinya).
+     * Hapus user (admin / admin_bidang only). Mendukung id="me" (tetapi dicegah hapus dirinya).
      */
     public function destroy(Request $request, string $id)
     {
         $actor = auth('api')->user();
-        if (!$actor || $actor->role !== 'admin') {
+        if (!$actor || !in_array($actor->role, ['admin', 'admin_bidang'], true)) {
             return response()->json(['error' => 'Unauthorized.'], 403);
         }
 
@@ -184,7 +218,7 @@ class UserManagementController extends Controller
             return response()->json(['error' => 'User not found.'], 404);
         }
 
-        // Cegah admin hapus dirinya sendiri
+        // Cegah admin/admin_bidang hapus dirinya sendiri
         if ($actor->id === $target->id) {
             return response()->json(['error' => 'You cannot delete your own account.'], 403);
         }
@@ -203,7 +237,6 @@ class UserManagementController extends Controller
 
     /**
      * Alias lama agar tidak error "Call to undefined method ... deleteUser()"
-     * (opsional, kalau ada FE lama yang masih memanggil deleteUser)
      */
     public function deleteUser(Request $request, string $id)
     {
@@ -216,10 +249,7 @@ class UserManagementController extends Controller
      * Resolve target user dari {id} dan cek otorisasi:
      * - "me" → actor
      * - UUID → user tsb
-     * Return:
-     *   - User  : jika authorized
-     *   - JsonResponse 404: jika user tidak ditemukan
-     *   - JsonResponse 403: jika bukan admin & bukan dirinya sendiri
+     * Admin/admin_bidang boleh akses user mana saja, user biasa hanya dirinya.
      */
     private function resolveTargetUser(User $actor, string $id)
     {
@@ -229,7 +259,9 @@ class UserManagementController extends Controller
             return response()->json(['error' => 'User not found.'], 404);
         }
 
-        if ($actor->role === 'admin' || $actor->id === $target->id) {
+        $isAdmin = in_array($actor->role, ['admin', 'admin_bidang'], true);
+
+        if ($isAdmin || $actor->id === $target->id) {
             return $target;
         }
 

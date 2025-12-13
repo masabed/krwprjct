@@ -298,7 +298,7 @@ class SAPDIndividualController extends Controller
         }
 
         $role    = strtolower((string) ($user->role ?? ''));
-        $isAdmin = in_array($role, ['admin', 'admin_bidang'], true);
+        $isAdmin = in_array($role, ['admin', 'operator'], true);
 
         $q = UsulanSAPDSIndividual::query()->latest();
 
@@ -380,6 +380,7 @@ class SAPDIndividualController extends Controller
             return [
                 'uuidPerencanaan' => (string) $row->id,
                 'uuidUsulan'      => (string) $row->uuidUsulan,
+                  'dokumentasi'     => $p->dokumentasi ?? [],
                 'nilaiHPS'        => $row->nilaiHPS,
                 'lembarKontrol'   => $row->lembarKontrol,
                 'catatanSurvey'   => $row->catatanSurvey,

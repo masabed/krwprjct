@@ -13,6 +13,7 @@ use App\Models\Perencanaan;
 // ====== Model usulan kandidat ======
 use App\Models\UsulanFisikBSL;
 use App\Models\PsuSerahTerima;
+use App\Models\TpuSerahTerima;                     // <== NEW: TPU Serah Terima
 use App\Models\PSUUsulanFisikPerumahan;
 use App\Models\PSUUsulanFisikTPU;
 use App\Models\PSUUsulanFisikPJL;
@@ -74,7 +75,7 @@ class PerencanaanController extends Controller
 
     /**
      * POST /api/psu/perencanaan/upload
-     * Upload TEMP → balikin UUID untuk dipakai di lembarKontrol
+     * Upload TEMP → balikin UUID untuk dipakai di lembarKontrol/dokumentasi
      */
     public function upload(Request $request)
     {
@@ -112,8 +113,8 @@ class PerencanaanController extends Controller
         return response()->json([
             'success' => true,
             'data' => [
-                'uuid'          => $temp->uuid,
-                'user_id'       => $temp->user_id,
+                'uuid'    => $temp->uuid,
+                'user_id' => $temp->user_id,
             ],
         ], 201);
     }
@@ -161,9 +162,198 @@ class PerencanaanController extends Controller
     }
 
     /**
+     * GET /api/perencanaan/file/preview/{uuid}
+     *
+     * Preview fixed-size:
+     *  - image/*  → resize lebar 512px (JPEG)
+     *  - PDF      → halaman pertama jadi JPEG lebar 512px
+     *
+     * Optional: ?source=final|temp (default: final→temp)
+     */
+    public function preview(string $uuid, Request $request)
+    {
+        $source = $request->query('source'); // final | temp | null
+        $disk   = Storage::disk(config('filesystems.default'));
+
+        if ($source === 'final') {
+            $file = PerencanaanUpload::where('uuid', $uuid)->first();
+        } elseif ($source === 'temp') {
+            $file = PerencanaanUploadTemp::where('uuid', $uuid)->first();
+        } else {
+            $file = PerencanaanUpload::where('uuid', $uuid)->first()
+                 ?: PerencanaanUploadTemp::where('uuid', $uuid)->first();
+        }
+
+        if (!$file) {
+            return response()->json([
+                'success' => false,
+                'message' => 'File not found in FINAL or TEMP',
+            ], 404);
+        }
+
+        if (!$disk->exists($file->file_path)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Physical file missing on disk',
+            ], 404);
+        }
+
+        $abs = method_exists($disk, 'path')
+            ? $disk->path($file->file_path)
+            : storage_path('app/'.$file->file_path);
+
+        $mime = $file->mime
+            ?: ($disk->mimeType($file->file_path)
+            ?: (function_exists('mime_content_type') ? @mime_content_type($abs) : null));
+
+        $w = 512; // target width
+
+        // ====================== IMAGE PREVIEW ======================
+        if ($mime && str_starts_with($mime, 'image/')) {
+            if (class_exists(\Intervention\Image\ImageManagerStatic::class)) {
+                try {
+                    $img = \Intervention\Image\ImageManagerStatic::make($abs)
+                        ->orientate()
+                        ->resize($w, $w, function ($c) {
+                            $c->aspectRatio();
+                            $c->upsize();
+                        });
+
+                    $binary = $img->encode('jpg', 75);
+
+                    return response($binary, 200, [
+                        'Content-Type'            => 'image/jpeg',
+                        'X-Content-Type-Options'  => 'nosniff',
+                        'Cache-Control'           => 'private, max-age=86400',
+                        'X-Preview-Engine'        => 'intervention',
+                        'X-Preview-Bytes'         => (string) strlen($binary),
+                    ]);
+                } catch (\Throwable $e) {
+                    // fallback ke GD
+                }
+            }
+
+            if (function_exists('imagecreatefromstring') && function_exists('imagecreatetruecolor')) {
+                try {
+                    $data = @file_get_contents($abs);
+                    if ($data !== false) {
+                        $src = @imagecreatefromstring($data);
+                        if ($src !== false) {
+                            $srcW = imagesx($src) ?: 1;
+                            $srcH = imagesy($src) ?: 1;
+
+                            $targetW = $w;
+                            $targetH = (int) round($srcH * ($w / $srcW));
+
+                            $dst = imagecreatetruecolor($targetW, $targetH);
+                            imagecopyresampled(
+                                $dst, $src,
+                                0, 0, 0, 0,
+                                $targetW, $targetH, $srcW, $srcH
+                            );
+
+                            ob_start();
+                            imagejpeg($dst, null, 75);
+                            $binary = ob_get_clean();
+
+                            imagedestroy($src);
+                            imagedestroy($dst);
+
+                            if ($binary !== false) {
+                                return response($binary, 200, [
+                                    'Content-Type'            => 'image/jpeg',
+                                    'X-Content-Type-Options'  => 'nosniff',
+                                    'Cache-Control'           => 'private, max-age=86400',
+                                    'X-Preview-Engine'        => 'gd',
+                                    'X-Preview-Bytes'         => (string) strlen($binary),
+                                ]);
+                            }
+                        }
+                    }
+                } catch (\Throwable $e) {
+                    // fallthrough
+                }
+            }
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Preview requires GD or Intervention Image for images.',
+            ], 415);
+        }
+
+        // ====================== PDF PREVIEW ======================
+        $isPdf = ($mime === 'application/pdf') || str_ends_with(strtolower($abs), '.pdf');
+        if ($isPdf) {
+            if (class_exists(\Imagick::class)) {
+                try {
+                    $targetWidth  = 512;
+                    $targetDpi    = 96;
+                    $jpegQuality  = 60;
+
+                    $im = new \Imagick();
+                    $im->setResolution($targetDpi, $targetDpi);
+                    $im->readImage($abs . '[0]');
+                    $im->setImageBackgroundColor(new \ImagickPixel('white'));
+                    $im->setImageAlphaChannel(\Imagick::ALPHACHANNEL_REMOVE);
+                    $im->setImageFormat('jpeg');
+                    $im->stripImage();
+
+                    $origW = $im->getImageWidth() ?: 1;
+                    $origH = $im->getImageHeight() ?: 1;
+
+                    if ($origW > $targetWidth) {
+                        $ratio        = $targetWidth / $origW;
+                        $targetHeight = (int) max(1, round($origH * $ratio));
+                    } else {
+                        $targetWidth  = $origW;
+                        $targetHeight = $origH;
+                    }
+
+                    $im->thumbnailImage($targetWidth, $targetHeight, true);
+                    $im->setImageCompression(\Imagick::COMPRESSION_JPEG);
+                    $im->setImageCompressionQuality($jpegQuality);
+
+                    $blob = $im->getImageBlob();
+                    $size = strlen($blob);
+
+                    $im->clear();
+                    $im->destroy();
+
+                    return response($blob, 200, [
+                        'Content-Type'            => 'image/jpeg',
+                        'Content-Length'          => (string) $size,
+                        'X-Content-Type-Options'  => 'nosniff',
+                        'Cache-Control'           => 'private, max-age=86400',
+                        'X-Preview-Engine'        => 'imagick',
+                        'X-Preview-Bytes'         => (string) $size,
+                    ]);
+                } catch (\Throwable $e) {
+                    \Log::warning('Perencanaan PDF thumbnail failed', [
+                        'file'  => $abs,
+                        'error' => $e->getMessage(),
+                    ]);
+
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Unable to generate PDF preview. Please open the original file.',
+                    ], 500);
+                }
+            }
+
+            return response()->json([
+                'success' => false,
+                'message' => 'PDF preview requires Imagick. Please open the original file.',
+            ], 415);
+        }
+
+        return response()->json([
+            'success' => false,
+            'message' => 'Preview only supports images and PDFs.',
+        ], 415);
+    }
+
+    /**
      * DELETE /api/psu/perencanaan/file/{uuid}
-     * (alternatif POST /api/psu/perencanaan/file/{uuid}/delete)
-     * ?source=final|temp, ?delete_all=true
      */
     public function fileDestroy(string $uuid, Request $request)
     {
@@ -222,177 +412,215 @@ class PerencanaanController extends Controller
 
     /**
      * POST /api/psu/perencanaan/create
-     * Body bisa kirim lembarKontrol sebagai ARRAY atau STRING (JSON/CSV/single)
      */
- public function store(Request $request)
-{
-    // === ADMIN ONLY ===
-    $auth = $request->user();
-    if (!$auth) {
-        return response()->json(['success' => false, 'message' => 'Unauthenticated'], 401);
-    }
-    if (strtolower((string)($auth->role ?? '')) !== 'admin') {
-        return response()->json(['success' => false, 'message' => 'Unauthorized.'], 403);
-    }
-
-    // Terima string array & normalisasi ke array ['uuid', ...]
-    $this->normalizeUuidArrayField($request, 'lembarKontrol');
-
-    $validated = $request->validate([
-        'uuidUsulan'      => ['required','uuid'],
-        'nilaiHPS'        => ['sometimes','nullable','string','max:255'],
-        'catatanSurvey'   => ['sometimes','nullable','string','max:512'],
-        'lembarKontrol'   => ['sometimes','array','min:1','max:50'],
-        'lembarKontrol.*' => ['uuid'],
-    ]);
-
-    // ===== CEK DUPLIKAT uuidUsulan =====
-    $already = Perencanaan::where('uuidUsulan', $validated['uuidUsulan'])->exists();
-    if ($already) {
-        return response()->json([
-            'success'    => false,
-            'message'    => 'Perencanaan untuk uuidUsulan tersebut sudah ada. Tidak boleh input duplikat.',
-            'uuidUsulan' => $validated['uuidUsulan'],
-        ], 422);
-    }
-
-    // Cari usulan tujuan
-    $usulan = $this->findUsulanByUuid($validated['uuidUsulan']);
-    if (!$usulan) {
-        return response()->json([
-            'success' => false,
-            'message' => 'Usulan tidak ditemukan untuk uuidUsulan yang diberikan.',
-        ], 422);
-    }
-
-    // Buat Perencanaan + set status usulan = 5 (clear pesan_verifikasi jika ada)
-    $row = null;
-    DB::transaction(function () use (&$row, $validated, $usulan) {
-        // 1) create perencanaan
-        $row = Perencanaan::create($validated);
-
-        // 2) paksa status jadi 5 pada tabel usulan tujuan
-        $table = $usulan->getTable();
-        if (Schema::hasColumn($table, 'status_verifikasi_usulan')) {
-            $usulan->status_verifikasi_usulan = 5;
-            if (Schema::hasColumn($table, 'pesan_verifikasi')) {
-                $usulan->pesan_verifikasi = null;
-            }
-            $usulan->save();
+    public function store(Request $request)
+    {
+        // === ACCESS CONTROL: hanya admin_bidang & operator ===
+        $auth = auth()->user();
+        if (!$auth) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthenticated',
+            ], 401);
         }
-    });
 
-    // Pindahkan file dari TEMP → FINAL setelah commit
-    if ($request->user() && !empty($validated['lembarKontrol'])) {
-        $this->moveTempsToFinal($validated['lembarKontrol'], (string) $request->user()->id);
+        $role   = strtolower((string) ($auth->role ?? ''));
+        $isPriv = in_array($role, ['admin', 'operator'], true);  // <== FIXED
+
+        if (!$isPriv) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized. Hanya admin dan operator yang boleh membuat perencanaan.',
+            ], 403);
+        }
+
+        // Terima string array & normalisasi ke array ['uuid', ...]
+        $this->normalizeUuidArrayField($request, 'lembarKontrol');
+        $this->normalizeUuidArrayField($request, 'dokumentasi');
+
+        $validated = $request->validate([
+            'uuidUsulan'      => ['required','uuid'],
+            'nilaiHPS'        => ['sometimes','nullable','string','max:255'],
+            'catatanSurvey'   => ['sometimes','nullable','string','max:512'],
+
+            'lembarKontrol'   => ['sometimes','array','min:1','max:50'],
+            'lembarKontrol.*' => ['uuid'],
+
+            'dokumentasi'     => ['sometimes','nullable','array','max:5'],
+            'dokumentasi.*'   => ['uuid'],
+        ]);
+
+        // ===== CEK DUPLIKAT uuidUsulan =====
+        $already = Perencanaan::where('uuidUsulan', $validated['uuidUsulan'])->exists();
+        if ($already) {
+            return response()->json([
+                'success'    => false,
+                'message'    => 'Perencanaan untuk uuidUsulan tersebut sudah ada. Tidak boleh input duplikat.',
+                'uuidUsulan' => $validated['uuidUsulan'],
+            ], 422);
+        }
+
+        // Cari usulan tujuan (sekarang termasuk TpuSerahTerima)
+        $usulan = $this->findUsulanByUuid($validated['uuidUsulan']);
+        if (!$usulan) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Usulan tidak ditemukan untuk uuidUsulan yang diberikan.',
+            ], 422);
+        }
+
+        // Buat Perencanaan + set status usulan = 5
+        $row = null;
+        DB::transaction(function () use (&$row, $validated, $usulan) {
+            $row = Perencanaan::create($validated);
+
+            $table = $usulan->getTable();
+            if (Schema::hasColumn($table, 'status_verifikasi_usulan')) {
+                $usulan->status_verifikasi_usulan = 5;
+                if (Schema::hasColumn($table, 'pesan_verifikasi')) {
+                    $usulan->pesan_verifikasi = null;
+                }
+                $usulan->save();
+            }
+        });
+
+        // Pindahkan file dari TEMP → FINAL setelah commit
+        $fileUuids = [];
+
+        if (!empty($validated['lembarKontrol'])) {
+            $fileUuids = array_merge($fileUuids, $validated['lembarKontrol']);
+        }
+        if (!empty($validated['dokumentasi'])) {
+            $fileUuids = array_merge($fileUuids, $validated['dokumentasi']);
+        }
+
+        if ($auth && $fileUuids) {
+            $this->moveTempsToFinal(
+                array_values(array_unique($fileUuids)),
+                (string) $auth->id
+            );
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Data perencanaan berhasil dibuat. Status usulan dinaikkan ke 5.',
+            'data'    => $row,
+        ], 201);
     }
-
-    return response()->json([
-        'success' => true,
-        'message' => 'Data perencanaan berhasil dibuat. Status usulan dinaikkan ke 5.',
-        'data'    => $row,
-    ], 201);
-}
 
     /**
      * POST/PUT/PATCH /api/psu/perencanaan/update/{id}
-     * - lembarKontrol: null -> abaikan
-     * - lembarKontrol: []   -> kosongkan (hapus semua final)
-     * - lembarKontrol: "json string" / "csv" -> otomatis jadi array
      */
-   public function update(Request $request, string $id)
-{
-    // === Auth & Role guard (ADMIN ONLY) ===
-    $user = $request->user();
-    if (!$user) {
-        return response()->json(['success' => false, 'message' => 'Unauthenticated'], 401);
-    }
-    if (($user->role ?? null) !== 'admin') {
-        return response()->json(['success' => false, 'message' => 'Forbidden'], 403);
-    }
-
-    // === Ambil row perencanaan ===
-    $row = Perencanaan::find($id);
-    if (!$row) {
-        return response()->json(['success' => false, 'message' => 'Data tidak ditemukan'], 404);
-    }
-
-    // >>> TERIMA STRING array & normalisasi ke array
-    $this->normalizeUuidArrayField($request, 'lembarKontrol');
-
-    // === Validasi input ===
-    $validated = $request->validate([
-        'uuidUsulan'      => ['sometimes','uuid'],
-        'nilaiHPS'        => ['sometimes','nullable','string','max:255'],
-        'catatanSurvey'   => ['sometimes','nullable','string','max:512'],
-
-        'lembarKontrol'   => ['sometimes','nullable','array','max:50'],
-        'lembarKontrol.*' => ['uuid'],
-    ]);
-
-    // === Cek keberadaan usulan target (tanpa cek status) ===
-    $targetUuidUsulan = $validated['uuidUsulan'] ?? $row->uuidUsulan;
-    $usulan = $this->findUsulanByUuid($targetUuidUsulan);
-    if (!$usulan) {
-        return response()->json([
-            'success' => false,
-            'message' => 'Usulan tidak ditemukan untuk uuidUsulan yang diberikan.',
-        ], 422);
-    }
-
-    // === Hitung perubahan file (jika lembarKontrol dikirim) ===
-    $uuidsToMove = $removedUuids = [];
-    $incomingProvided = array_key_exists('lembarKontrol', $validated);
-
-    if ($incomingProvided) {
-        $incoming = $validated['lembarKontrol']; // bisa null/array
-        $existing = $row->lembarKontrol ?? [];
-
-        if (is_array($incoming)) {
-            $uuidsToMove  = array_values(array_diff($incoming, is_array($existing) ? $existing : []));
-            $removedUuids = array_values(array_diff(is_array($existing) ? $existing : [], $incoming));
+    public function update(Request $request, string $id)
+    {
+        // === Auth & Role guard (ADMIN ONLY) ===
+        $user = $request->user();
+        if (!$user) {
+            return response()->json(['success' => false, 'message' => 'Unauthenticated'], 401);
         }
-    }
+        if (($user->role ?? null) !== 'admin') {
+            return response()->json(['success' => false, 'message' => 'Forbidden'], 403);
+        }
 
-    // === Payload update: kalau lembarKontrol === null → abaikan (tidak overwrite ke null) ===
-    $payload = $validated;
-    if ($incomingProvided && is_null($payload['lembarKontrol'])) {
-        unset($payload['lembarKontrol']);
-    }
+        $row = Perencanaan::find($id);
+        if (!$row) {
+            return response()->json(['success' => false, 'message' => 'Data tidak ditemukan'], 404);
+        }
 
-    $row->fill($payload);
-    $dirty = $row->getDirty();
+        $this->normalizeUuidArrayField($request, 'lembarKontrol');
+        $this->normalizeUuidArrayField($request, 'dokumentasi');
 
-    if (empty($dirty)) {
+        $validated = $request->validate([
+            'uuidUsulan'      => ['sometimes','uuid'],
+            'nilaiHPS'        => ['sometimes','nullable','string','max:255'],
+            'catatanSurvey'   => ['sometimes','nullable','string','max:512'],
+
+            'lembarKontrol'   => ['sometimes','nullable','array','max:50'],
+            'lembarKontrol.*' => ['uuid'],
+
+            'dokumentasi'     => ['sometimes','nullable','array','max:5'],
+            'dokumentasi.*'   => ['uuid'],
+        ]);
+
+        $targetUuidUsulan = $validated['uuidUsulan'] ?? $row->uuidUsulan;
+        $usulan = $this->findUsulanByUuid($targetUuidUsulan);
+        if (!$usulan) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Usulan tidak ditemukan untuk uuidUsulan yang diberikan.',
+            ], 422);
+        }
+
+        $uuidsToMove  = [];
+        $removedUuids = [];
+
+        // lembarKontrol
+        $incomingLKProvided = array_key_exists('lembarKontrol', $validated);
+        if ($incomingLKProvided) {
+            $incoming = $validated['lembarKontrol'];
+            $existing = $row->lembarKontrol ?? [];
+
+            if (is_array($incoming)) {
+                $toMove  = array_values(array_diff($incoming, is_array($existing) ? $existing : []));
+                $removed = array_values(array_diff(is_array($existing) ? $existing : [], $incoming));
+
+                $uuidsToMove  = array_merge($uuidsToMove, $toMove);
+                $removedUuids = array_merge($removedUuids, $removed);
+            }
+        }
+
+        // dokumentasi
+        $incomingDokProvided = array_key_exists('dokumentasi', $validated);
+        if ($incomingDokProvided) {
+            $incoming = $validated['dokumentasi'];
+            $existing = $row->dokumentasi ?? [];
+
+            if (is_array($incoming)) {
+                $toMove  = array_values(array_diff($incoming, is_array($existing) ? $existing : []));
+                $removed = array_values(array_diff(is_array($existing) ? $existing : [], $incoming));
+
+                $uuidsToMove  = array_merge($uuidsToMove, $toMove);
+                $removedUuids = array_merge($removedUuids, $removed);
+            }
+        }
+
+        $payload = $validated;
+
+        if ($incomingLKProvided && array_key_exists('lembarKontrol', $payload) && is_null($payload['lembarKontrol'])) {
+            unset($payload['lembarKontrol']);
+        }
+        if ($incomingDokProvided && array_key_exists('dokumentasi', $payload) && is_null($payload['dokumentasi'])) {
+            unset($payload['dokumentasi']);
+        }
+
+        $row->fill($payload);
+        $dirty = $row->getDirty();
+
+        if (empty($dirty)) {
+            return response()->json([
+                'success' => true,
+                'message' => 'Tidak ada perubahan data',
+                'data'    => $row,
+                'changed' => [],
+            ]);
+        }
+
+        $row->save();
+
+        if ($uuidsToMove) {
+            $this->moveTempsToFinal(array_values(array_unique($uuidsToMove)), (string)$user->id);
+        }
+
+        if ($removedUuids) {
+            $this->deleteFinalFiles(array_values(array_unique($removedUuids)));
+        }
+
         return response()->json([
             'success' => true,
-            'message' => 'Tidak ada perubahan data',
-            'data'    => $row,
-            'changed' => [],
+            'message' => 'Field berikut berhasil diperbarui: ' . implode(', ', array_keys($dirty)),
+            'data'    => $row->fresh(),
         ]);
     }
-
-    $row->save();
-
-    // === Move temp→final untuk UUID baru ===
-    if ($uuidsToMove) {
-        $this->moveTempsToFinal(array_values(array_unique($uuidsToMove)), (string)$user->id);
-    }
-
-    // === Hapus final untuk UUID yang dibuang ===
-    if ($removedUuids) {
-        // Pastikan helper yang kamu punya di project:
-        // jika namanya deleteFinalUploads(), ganti baris di bawah ini.
-        $this->deleteFinalFiles(array_values(array_unique($removedUuids)));
-    }
-
-    return response()->json([
-        'success' => true,
-        'message' => 'Field berikut berhasil diperbarui: ' . implode(', ', array_keys($dirty)),
-        'data'    => $row->fresh(),
-    ]);
-}
-
 
     /**
      * DELETE /api/psu/perencanaan/{id}
@@ -420,12 +648,6 @@ class PerencanaanController extends Controller
     // Helpers
     // =============================================================================
 
-    /**
-     * Terima lembarKontrol dalam berbagai bentuk STRING/ARRAY dan normalkan ke array of UUID.
-     * - JSON: '["uuid","uuid2"]'
-     * - CSV:  'uuid,uuid2'
-     * - Single: 'uuid'
-     */
     private function normalizeUuidArrayField(Request $request, string $field): void
     {
         if (!$request->has($field)) return;
@@ -437,7 +659,6 @@ class PerencanaanController extends Controller
             $t = trim($val);
             $uuids = [];
 
-            // JSON array string
             if ($t !== '' && $t[0] === '[') {
                 $arr = json_decode($t, true);
                 if (is_array($arr)) {
@@ -451,7 +672,6 @@ class PerencanaanController extends Controller
                 }
             }
 
-            // CSV
             if (str_contains($t, ',')) {
                 foreach (array_map('trim', explode(',', $t)) as $p) {
                     if (preg_match('/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}/', $p, $m)) {
@@ -462,7 +682,6 @@ class PerencanaanController extends Controller
                 return;
             }
 
-            // Single UUID
             if (preg_match('/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}/', $t, $m)) {
                 $request->merge([$field => [strtolower($m[0])]]);
             }
@@ -471,13 +690,15 @@ class PerencanaanController extends Controller
 
     /**
      * Cari usulan di beberapa tabel kandidat dengan kunci fleksibel
+     * (Sekarang termasuk TpuSerahTerima)
      */
     private function findUsulanByUuid(string $value): ?object
     {
         $candidates = [
             UsulanFisikBSL::class,
             PSUUsulanFisikPerumahan::class,
-            PsuSerahTerima::class,
+            PsuSerahTerima::class,       // PSU serah terima perumahan
+            TpuSerahTerima::class,       // <== NEW: PSU serah terima TPU
             PSUUsulanFisikTPU::class,
             PSUUsulanFisikPJL::class,
             Permukiman::class,
@@ -511,9 +732,6 @@ class PerencanaanController extends Controller
         return null;
     }
 
-    /**
-     * Pindahkan file TEMP → FINAL
-     */
     private function moveTempsToFinal(array $fileUuids, string $userId): void
     {
         $fileUuids = array_values(array_unique(array_filter($fileUuids)));
@@ -526,7 +744,7 @@ class PerencanaanController extends Controller
 
         foreach ($fileUuids as $u) {
             $temp = $temps->get($u);
-            if (!$temp) continue; // mungkin sudah final/reuse
+            if (!$temp) continue;
 
             $oldPath = $temp->file_path;
             $ext     = strtolower(pathinfo($oldPath, PATHINFO_EXTENSION) ?: 'bin');
@@ -553,9 +771,6 @@ class PerencanaanController extends Controller
         }
     }
 
-    /**
-     * Hapus file FINAL & row upload-nya
-     */
     private function deleteFinalFiles(array $uuids): void
     {
         $uuids = array_values(array_unique(array_filter($uuids)));

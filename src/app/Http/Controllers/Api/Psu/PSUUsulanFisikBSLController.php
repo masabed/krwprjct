@@ -288,6 +288,7 @@ class PSUUsulanFisikBSLController extends Controller
                 'lembarKontrol'   => $r->lembarKontrol,
                 'nilaiHPS'        => $r->nilaiHPS,
                 'catatanSurvey'   => $r->catatanSurvey,
+                'dokumentasi'     => $p->dokumentasi ?? [],
                 'created_at'      => $r->created_at,
                 'updated_at'      => $r->updated_at,
             ];

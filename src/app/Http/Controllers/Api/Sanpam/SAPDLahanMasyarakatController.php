@@ -267,7 +267,7 @@ class SAPDLahanMasyarakatController extends Controller
 
         // Admin & admin_bidang bisa lihat semua
         $role    = strtolower((string) ($user->role ?? ''));
-        $isAdmin = in_array($role, ['admin', 'admin_bidang'], true);
+        $isAdmin = in_array($role, ['admin', 'operator'], true);
 
         $q = SAPDLahanMasyarakat::query()->latest();
 
@@ -349,6 +349,7 @@ class SAPDLahanMasyarakatController extends Controller
                 'uuidPerencanaan' => (string) $row->id,
                 'uuidUsulan'      => (string) $row->uuidUsulan,
                 'nilaiHPS'        => $row->nilaiHPS,
+                  'dokumentasi'     => $p->dokumentasi ?? [],
                 'lembarKontrol'   => $row->lembarKontrol,
                 'catatanSurvey'   => $row->catatanSurvey,
                 'created_at'      => $row->created_at,

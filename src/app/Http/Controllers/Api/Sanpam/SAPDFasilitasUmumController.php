@@ -301,46 +301,67 @@ class SAPDFasilitasUmumController extends Controller
     }
 
     // List (tanpa pagination) — ?mine=1 untuk hanya data milik user login
-    public function index(Request $request)
-    {
-        $q = UsulanSAPDSFasilitasUmum::query()->latest();
-
-        if ($request->boolean('mine') && auth()->check()) {
-            $q->where('user_id', (string) auth()->id());
-        }
-
-        $list = $q->get()->map(function ($item) {
-            return [
-                'uuid'                     => $item->uuid,
-                'user_id'                  => $item->user_id,
-
-                'sumberUsulan'             => $item->sumberUsulan,
-                'namaAspirator'            => $item->namaAspirator,
-                'noKontakAspirator'        => $item->noKontakAspirator,
-
-                'namaFasilitasUmum'        => $item->namaFasilitasUmum,
-                'alamatFasilitasUmum'      => $item->alamatFasilitasUmum,
-                'rwFasilitasUmum'          => $item->rwFasilitasUmum,
-                'rtFasilitasUmum'          => $item->rtFasilitasUmum,
-                'kecamatan'                => $item->kecamatan,
-                'kelurahan'                => $item->kelurahan,
-                'ukuranLahan'              => $item->ukuranLahan,
-                'statusKepemilikan'        => $item->statusKepemilikan,
-                'titikLokasi'              => $item->titikLokasi,
-                'pesan_verifikasi'         => $item->pesan_verifikasi,
-
-                // Array UUID file
-                'buktiKepemilikan'         => $item->buktiKepemilikan ?? [],
-                'fotoLahan'                => $item->fotoLahan ?? [],
-
-                // status verifikasi usulan
-                'status_verifikasi_usulan' => $item->status_verifikasi_usulan,
-                'created_at'               => $item->created_at,
-            ];
-        });
-
-        return response()->json(['success' => true, 'data' => $list]);
+   public function index(Request $request)
+{
+    $auth = auth()->user();
+    if (!$auth) {
+        return response()->json([
+            'success' => false,
+            'message' => 'Unauthenticated',
+        ], 401);
     }
+
+    $role   = strtolower((string) ($auth->role ?? ''));
+    $isPriv = in_array($role, ['admin', 'admin_bidang', 'operator', 'pengawas'], true);
+
+    $q = UsulanSAPDSFasilitasUmum::query()->latest();
+
+    if ($isPriv) {
+        // Role privileged: boleh lihat semua, tapi kalau ?mine=1 → filter ke miliknya
+        if ($request->boolean('mine')) {
+            $q->where('user_id', (string) $auth->id);
+        }
+    } else {
+        // Bukan privileged (misal: user biasa) → hanya data miliknya
+        $q->where('user_id', (string) $auth->id);
+    }
+
+    $list = $q->get()->map(function ($item) {
+        return [
+            'uuid'                     => $item->uuid,
+            'user_id'                  => $item->user_id,
+
+            'sumberUsulan'             => $item->sumberUsulan,
+            'namaAspirator'            => $item->namaAspirator,
+            'noKontakAspirator'        => $item->noKontakAspirator,
+
+            'namaFasilitasUmum'        => $item->namaFasilitasUmum,
+            'alamatFasilitasUmum'      => $item->alamatFasilitasUmum,
+            'rwFasilitasUmum'          => $item->rwFasilitasUmum,
+            'rtFasilitasUmum'          => $item->rtFasilitasUmum,
+            'kecamatan'                => $item->kecamatan,
+            'kelurahan'                => $item->kelurahan,
+            'ukuranLahan'              => $item->ukuranLahan,
+            'statusKepemilikan'        => $item->statusKepemilikan,
+            'titikLokasi'              => $item->titikLokasi,
+            'pesan_verifikasi'         => $item->pesan_verifikasi,
+
+            // Array UUID file
+            'buktiKepemilikan'         => $item->buktiKepemilikan ?? [],
+            'fotoLahan'                => $item->fotoLahan ?? [],
+
+            // status verifikasi usulan
+            'status_verifikasi_usulan' => $item->status_verifikasi_usulan,
+            'created_at'               => $item->created_at,
+        ];
+    });
+
+    return response()->json([
+        'success' => true,
+        'data'    => $list,
+    ]);
+}
+
 
     // Detail
     public function show(string $uuid)
@@ -376,6 +397,7 @@ class SAPDFasilitasUmumController extends Controller
                 'uuidPerencanaan' => (string) $row->id,
                 'uuidUsulan'      => (string) $row->uuidUsulan,
                 'nilaiHPS'        => $row->nilaiHPS,
+                  'dokumentasi'     => $p->dokumentasi ?? [],
                 'catatanSurvey'   => $row->catatanSurvey,
                 'lembarKontrol'   => $row->lembarKontrol,
                 'created_at'      => $row->created_at,

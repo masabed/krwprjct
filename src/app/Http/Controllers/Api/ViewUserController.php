@@ -56,7 +56,7 @@ public function indexPengawas(Request $request)
     }
 
     // Hanya admin / admin_bidang yang boleh lihat daftar pengawas
-    if (!in_array($auth->role ?? null, ['admin','admin_bidang'], true)) {
+    if (!in_array($auth->role ?? null, ['admin'], true)) {
         return response()->json(['error' => 'Unauthorized.'], 403);
     }
 

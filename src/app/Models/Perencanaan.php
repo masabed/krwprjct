@@ -14,24 +14,21 @@ class Perencanaan extends Model
     public $incrementing = false;
     protected $keyType = 'string';
 
-    /**
-     * Kolom yang boleh di-mass assign.
-     * (Tidak perlu 'id' karena akan di-generate otomatis pada creating)
-     */
     protected $fillable = [
         'uuidUsulan',
         'nilaiHPS',
         'catatanSurvey',
         'lembarKontrol', // JSON array of file UUIDs (FINAL)
+        'dokumentasi',   // JSON array of up to 5 image UUIDs
     ];
 
     protected $casts = [
         'lembarKontrol' => 'array',
+        'dokumentasi'   => 'array',
         'created_at'    => 'datetime',
         'updated_at'    => 'datetime',
     ];
 
-    // Generate UUID untuk kolom "id" saat create jika belum ada
     protected static function boot()
     {
         parent::boot();

@@ -91,6 +91,7 @@ class PSUUsulanFisikPJLController extends Controller
                 'uuidUsulan'      => (string) $r->uuidUsulan,
                 'nilaiHPS'        => $r->nilaiHPS,
                 'lembarKontrol'   => $r->lembarKontrol,
+                  'dokumentasi'     => $p->dokumentasi ?? [],
                 'catatanSurvey'   => $r->catatanSurvey,
                 'created_at'      => $r->created_at,
                 'updated_at'      => $r->updated_at,
