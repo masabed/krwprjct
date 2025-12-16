@@ -269,12 +269,15 @@ public function index(Request $request)
 public function store(Request $request)
 {
     $auth = $request->user();
-    if (!$auth) {
-        return response()->json(['success' => false, 'message' => 'Unauthenticated'], 401);
-    }
-    if (strtolower((string)($auth->role ?? '')) !== 'admin') {
-        return response()->json(['success' => false, 'message' => 'Unauthorized.'], 403);
-    }
+if (!$auth) {
+    return response()->json(['success' => false, 'message' => 'Unauthenticated'], 401);
+}
+
+$role = strtolower((string) ($auth->role ?? ''));
+
+if (!in_array($role, ['admin', 'operator'], true)) {
+    return response()->json(['success' => false, 'message' => 'Unauthorized.'], 403);
+}
 
     // Hanya SATU uuidUsulan (string uuid), bukan array
     $rules = [
@@ -463,18 +466,20 @@ public function update(Request $request, string $id)
 {
     // ==== Auth & Role Guard (ADMIN ONLY) ====
     $user = $request->user();
-    if (!$user) {
-        return response()->json(['success' => false, 'message' => 'Unauthenticated'], 401);
-    }
-    if (strtolower((string)($user->role ?? '')) !== 'admin') {
-        return response()->json(['success' => false, 'message' => 'Unauthorized'], 403);
-    }
-    // ========================================
+if (!$user) {
+    return response()->json(['success' => false, 'message' => 'Unauthenticated'], 401);
+}
 
-    $row = Pembangunan::find($id);
-    if (!$row) {
-        return response()->json(['success' => false, 'message' => 'Data tidak ditemukan'], 404);
-    }
+$role = strtolower((string) ($user->role ?? ''));
+if (!in_array($role, ['admin', 'operator'], true)) {
+    return response()->json(['success' => false, 'message' => 'Unauthorized'], 403);
+}
+// =============================================
+
+$row = Pembangunan::find($id);
+if (!$row) {
+    return response()->json(['success' => false, 'message' => 'Data tidak ditemukan'], 404);
+}
 
     // Normalisasi input uuidUsulan (boleh kirim string JSON atau "a,b,c")
     if ($request->has('uuidUsulan')) {

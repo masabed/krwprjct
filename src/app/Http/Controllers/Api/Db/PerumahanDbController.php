@@ -17,8 +17,7 @@ class PerumahanDbController extends Controller
 {
     /** Kolom JSON array UUID yang dikelola (harus kirim UUID dari upload) */
     private const FILE_ARRAY_FIELDS = [
-        'foto_gerbang',        // max 5
-        'fileSerahTerimaTPU',  // max 10
+        'foto_gerbang', // max 5
     ];
 
     // =========================================================
@@ -27,7 +26,7 @@ class PerumahanDbController extends Controller
     public function upload(Request $request)
     {
         $request->validate([
-            'file' => 'required|file|mimes:jpg,jpeg,png,webp,pdf|max:5120',
+            'file' => 'required|file|mimes:jpg,jpeg,png,webp,pdf|max:10240',
         ]);
 
         $userId = auth()->id();
@@ -73,51 +72,35 @@ class PerumahanDbController extends Controller
         foreach (self::FILE_ARRAY_FIELDS as $f) {
             $this->normalizeUuidArrayField($request, $f);
         }
-        // String biasa opsional (tetap ADA)
-        $this->normalizeFlexibleString($request, 'bastTPU');
 
         $validated = $request->validate([
-            'namaPerumahan'       => 'required|string|max:255',
-            'developerPerumahan'  => 'required|string|max:255',
-            'tahunDibangun'       => 'required|string|max:10',
-            'luasPerumahan'       => 'required|string|max:50',
-            'jenisPerumahan'      => 'required|string|max:100',
-            'kecamatan'           => 'required|string|max:100',
-            'kelurahan'           => 'required|string|max:100',
-            'alamatPerumahan'     => 'required|string|max:500',
-            'rwPerumahan'         => 'sometimes|string|max:100',
-            'rtPerumahan'         => 'sometimes|string|max:100',
-            'titikLokasi'         => 'required|string|max:255',
+            'namaPerumahan'      => 'required|string|max:255',
+            'developerPerumahan' => 'required|string|max:255',
+            'tahunDibangun'      => 'required|string|max:10',
+            'luasPerumahan'      => 'required|string|max:50',
+            'jenisPerumahan'     => 'required|string|max:100',
+            'kecamatan'          => 'required|string|max:100',
+            'kelurahan'          => 'required|string|max:100',
+            'alamatPerumahan'    => 'required|string|max:500',
+            'rwPerumahan'        => 'sometimes|string|max:100',
+            'rtPerumahan'        => 'sometimes|string|max:100',
+            'titikLokasi'        => 'required|string|max:255',
 
             // ARRAY UUID
-            'foto_gerbang'        => 'required|array|min:1|max:5',
-            'foto_gerbang.*'      => 'uuid',
+            'foto_gerbang'       => 'required|array|min:1|max:5',
+            'foto_gerbang.*'     => 'uuid',
 
-            // ARRAY UUID opsional
-            'fileSerahTerimaTPU'  => 'sometimes|array|max:10',
-            'fileSerahTerimaTPU.*'=> 'uuid',
-
-            // String biasa
-            'bastTPU'             => 'sometimes|nullable|string|max:255',
-            'pesan_verifikasi'    => 'sometimes|nullable|string|max:512',
+            'pesan_verifikasi'   => 'sometimes|nullable|string|max:512',
 
             // Kontrol
-            'duplicate'           => 'sometimes|boolean',
-
-            // INTEGER 0–4, bukan boolean
-            'status_serah_terima' => 'sometimes|integer|in:0,1,2,3,4',
+            'duplicate'          => 'sometimes|boolean',
         ]);
-
-        // Default ke 0 kalau tidak dikirim
-        if (!array_key_exists('status_serah_terima', $validated)) {
-            $validated['status_serah_terima'] = 0;
-        }
 
         // FINAL-kan kolom file array UUID
         $finals = [];
         foreach (self::FILE_ARRAY_FIELDS as $f) {
             if (array_key_exists($f, $validated)) {
-                $max = $f === 'foto_gerbang' ? 5 : 10;
+                $max = 5; // foto_gerbang
                 $finals[$f] = $this->ensureFinalUploads(
                     array_slice($validated[$f], 0, $max),
                     (string) $user->id,
@@ -129,7 +112,7 @@ class PerumahanDbController extends Controller
         // Satukan payload
         $payload = array_merge($validated, $finals);
 
-        // Default [] untuk yang tidak dikirim
+        // Default [] untuk yang tidak dikirim (jaga-jaga)
         foreach (self::FILE_ARRAY_FIELDS as $f) {
             if (!array_key_exists($f, $payload)) {
                 $payload[$f] = [];
@@ -173,6 +156,7 @@ class PerumahanDbController extends Controller
             'titik'       => 'titikLokasi',
             'fotoGerbang' => 'foto_gerbang',
         ];
+
         $merge = [];
         foreach ($aliases as $from => $to) {
             if ($request->has($from) && !$request->has($to)) {
@@ -189,36 +173,27 @@ class PerumahanDbController extends Controller
                 $this->normalizeUuidArrayField($request, $f);
             }
         }
-        if ($request->has('bastTPU')) {
-            $this->normalizeFlexibleString($request, 'bastTPU');
-        }
 
         // Validasi partial
         $validated = $request->validate([
-            'namaPerumahan'       => 'sometimes|string|max:255',
-            'developerPerumahan'  => 'sometimes|string|max:255',
-            'tahunDibangun'       => 'sometimes|string|max:10',
-            'luasPerumahan'       => 'sometimes|string|max:50',
-            'jenisPerumahan'      => 'sometimes|string|max:100',
-            'kecamatan'           => 'sometimes|string|max:100',
-            'kelurahan'           => 'sometimes|string|max:100',
-            'alamatPerumahan'     => 'sometimes|string|max:500',
-            'rwPerumahan'         => 'sometimes|string|max:100',
-            'rtPerumahan'         => 'sometimes|string|max:100',
-            'titikLokasi'         => 'sometimes|string|max:255',
+            'namaPerumahan'      => 'sometimes|string|max:255',
+            'developerPerumahan' => 'sometimes|string|max:255',
+            'tahunDibangun'      => 'sometimes|string|max:10',
+            'luasPerumahan'      => 'sometimes|string|max:50',
+            'jenisPerumahan'     => 'sometimes|string|max:100',
+            'kecamatan'          => 'sometimes|string|max:100',
+            'kelurahan'          => 'sometimes|string|max:100',
+            'alamatPerumahan'    => 'sometimes|string|max:500',
+            'rwPerumahan'        => 'sometimes|string|max:100',
+            'rtPerumahan'        => 'sometimes|string|max:100',
+            'titikLokasi'        => 'sometimes|string|max:255',
 
-            // integer 0–4
-            'status_serah_terima' => 'sometimes|integer|in:0,1,2,3,4',
+            'pesan_verifikasi'   => 'sometimes|nullable|string|max:512',
 
-            'bastTPU'             => 'sometimes|nullable|string|max:255',
-            'pesan_verifikasi'    => 'sometimes|nullable|string|max:512',
+            'foto_gerbang'       => 'sometimes|nullable|array|min:1|max:5',
+            'foto_gerbang.*'     => 'uuid',
 
-            'foto_gerbang'        => 'sometimes|nullable|array|min:1|max:5',
-            'foto_gerbang.*'      => 'uuid',
-            'fileSerahTerimaTPU'  => 'sometimes|nullable|array|max:10',
-            'fileSerahTerimaTPU.*'=> 'uuid',
-
-            'duplicate'           => 'sometimes|boolean',
+            'duplicate'          => 'sometimes|boolean',
         ]);
 
         // Tangani kolom file array UUID kalau dikirim
@@ -231,7 +206,7 @@ class PerumahanDbController extends Controller
                 continue;
             }
 
-            $max = $f === 'foto_gerbang' ? 5 : 10;
+            $max = 5;
             $incoming = $this->ensureFinalUploads(
                 array_slice($validated[$f], 0, $max),
                 (string) $user->id,
@@ -287,41 +262,51 @@ class PerumahanDbController extends Controller
             ], 404);
         }
 
-        // PSU Serah Terima
+        $data = $row->toArray();
+        // jaga-jaga kalau dulu pernah ada field ini
+        unset($data['idSerahTerima'], $data['noBASTPSU'], $data['noBASTTPU']);
+
+        // ================= PSU Serah Terima =================
         $psuRows = PsuSerahTerima::where('perumahanId', $row->id)
             ->orderByDesc('created_at')
             ->get();
 
-        $psuSerahTerimaList = $psuRows->map(function ($r) {
-            return [
-                'idSerahTerima'            => (string) $r->id,
-                'noBASTPSU'                => $r->noBASTPSU,
-                'status_verifikasi_usulan' => $r->status_verifikasi_usulan ?? null,
-                'created_at'               => optional($r->created_at)->toIso8601String(),
-                'updated_at'               => optional($r->updated_at)->toIso8601String(),
-            ];
-        })->values();
+        if ($psuRows->isNotEmpty()) {
+            $psuSerahTerimaList = $psuRows->map(function ($r) {
+                return [
+                    'idSerahTerima'            => (string) $r->id,
+                    'noBASTPSU'                => $r->noBASTPSU,
+                    'status_verifikasi_usulan' => $r->status_verifikasi_usulan ?? null,
+                    'created_at'               => optional($r->created_at)->toIso8601String(),
+                    'updated_at'               => optional($r->updated_at)->toIso8601String(),
+                ];
+            })->values();
 
-        // TPU Serah Terima
+            if ($psuSerahTerimaList->isNotEmpty()) {
+                $data['psuSerahTerimaList'] = $psuSerahTerimaList;
+            }
+        }
+
+        // ================= TPU Serah Terima =================
         $tpuRows = TpuSerahTerima::where('perumahanId', $row->id)
             ->orderByDesc('created_at')
             ->get();
 
-        $tpuSerahTerimaList = $tpuRows->map(function ($r) {
-            return [
-                'idSerahTerima'            => (string) $r->id,
-                'noBASTTPU'                => $r->noBASTTPU,
-                'status_verifikasi_usulan' => $r->status_verifikasi_usulan ?? null,
-                'created_at'               => optional($r->created_at)->toIso8601String(),
-                'updated_at'               => optional($r->updated_at)->toIso8601String(),
-            ];
-        })->values();
+        if ($tpuRows->isNotEmpty()) {
+            $tpuSerahTerimaList = $tpuRows->map(function ($r) {
+                return [
+                    'idSerahTerima'            => (string) $r->id,
+                    'noBASTTPU'                => $r->noBASTTPU,
+                    'status_verifikasi_usulan' => $r->status_verifikasi_usulan ?? null,
+                    'created_at'               => optional($r->created_at)->toIso8601String(),
+                    'updated_at'               => optional($r->updated_at)->toIso8601String(),
+                ];
+            })->values();
 
-        $data = $row->toArray();
-        unset($data['idSerahTerima'], $data['noBASTPSU'], $data['noBASTTPU']); // jaga-jaga
-
-        $data['psuSerahTerimaList'] = $psuSerahTerimaList;
-        $data['tpuSerahTerimaList'] = $tpuSerahTerimaList;
+            if ($tpuSerahTerimaList->isNotEmpty()) {
+                $data['tpuSerahTerimaList'] = $tpuSerahTerimaList;
+            }
+        }
 
         return response()->json([
             'success' => true,
@@ -338,22 +323,70 @@ class PerumahanDbController extends Controller
             ->latest()
             ->get();
 
+        if ($rows->isEmpty()) {
+            return response()->json([
+                'success' => true,
+                'data'    => [],
+            ]);
+        }
+
+        $perumahanIds = $rows->pluck('id')
+            ->map(fn ($v) => (string) $v)
+            ->values()
+            ->all();
+
+        $tpuPerumahanIds = TpuSerahTerima::query()
+            ->whereIn('perumahanId', $perumahanIds)
+            ->pluck('perumahanId')
+            ->map(fn ($v) => (string) $v)
+            ->unique()
+            ->all();
+
+        $psuPerumahanIds = PsuSerahTerima::query()
+            ->whereIn('perumahanId', $perumahanIds)
+            ->pluck('perumahanId')
+            ->map(fn ($v) => (string) $v)
+            ->unique()
+            ->all();
+
+        $tpuSet = array_flip($tpuPerumahanIds);
+        $psuSet = array_flip($psuPerumahanIds);
+
+        $data = $rows->map(function (PerumahanDb $row) use ($tpuSet, $psuSet) {
+            $id = (string) $row->id;
+
+            $payload = $row->toArray();
+            $payload['hasSerahTerimaTPU'] = array_key_exists($id, $tpuSet);
+            $payload['hasSerahTerimaPSU'] = array_key_exists($id, $psuSet);
+
+            return $payload;
+        })->values();
+
         return response()->json([
             'success' => true,
-            'data'    => $rows,
+            'data'    => $data,
         ]);
     }
 
     // =========================================================
-    // INDEX BY STATUS (0 / 1 / 2)
+    // INDEX BY STATUS (0 / 1 / 2) - TANPA status_serah_terima
     // =========================================================
 
     // GET /api/perumahan-db/status/0
-    // pakai kolom status_serah_terima = 0
+    // Semua perumahan yang BELUM punya TPU dengan noBASTTPU terisi
     public function indexStatus0(Request $request)
     {
+        $perumahanTable = (new PerumahanDb)->getTable();
+        $tpuTable       = (new TpuSerahTerima)->getTable();
+
         $rows = PerumahanDb::query()
-            ->where('status_serah_terima', 0)
+            ->whereNotExists(function ($q) use ($tpuTable, $perumahanTable) {
+                $q->select(DB::raw(1))
+                    ->from($tpuTable)
+                    ->whereColumn($tpuTable . '.perumahanId', $perumahanTable . '.id')
+                    ->whereNotNull($tpuTable . '.noBASTTPU')
+                    ->whereRaw("TRIM({$tpuTable}.noBASTTPU) <> ''");
+            })
             ->latest()
             ->get();
 
@@ -366,7 +399,7 @@ class PerumahanDbController extends Controller
     }
 
     // GET /api/perumahan-db/status/1
-    // Semua perumahan yang sudah punya minimal 1 record TPU Serah Terima
+    // Semua perumahan yang sudah punya minimal 1 TPU Serah Terima dengan noBASTTPU terisi
     public function indexStatus1(Request $request)
     {
         $perumahanTable = (new PerumahanDb)->getTable();
@@ -375,8 +408,10 @@ class PerumahanDbController extends Controller
         $rows = PerumahanDb::query()
             ->whereExists(function ($q) use ($tpuTable, $perumahanTable) {
                 $q->select(DB::raw(1))
-                  ->from($tpuTable)
-                  ->whereColumn($tpuTable.'.perumahanId', $perumahanTable.'.id');
+                    ->from($tpuTable)
+                    ->whereColumn($tpuTable . '.perumahanId', $perumahanTable . '.id')
+                    ->whereNotNull($tpuTable . '.noBASTTPU')
+                    ->whereRaw("TRIM({$tpuTable}.noBASTTPU) <> ''");
             })
             ->latest()
             ->get();
@@ -390,7 +425,7 @@ class PerumahanDbController extends Controller
     }
 
     // GET /api/perumahan-db/status/2
-    // Semua perumahan yang sudah punya TPU *dan* PSU Serah Terima
+    // Semua perumahan yang sudah punya TPU dan PSU Serah Terima (BAST terisi)
     public function indexStatus2(Request $request)
     {
         $perumahanTable = (new PerumahanDb)->getTable();
@@ -400,13 +435,17 @@ class PerumahanDbController extends Controller
         $rows = PerumahanDb::query()
             ->whereExists(function ($q) use ($tpuTable, $perumahanTable) {
                 $q->select(DB::raw(1))
-                  ->from($tpuTable)
-                  ->whereColumn($tpuTable.'.perumahanId', $perumahanTable.'.id');
+                    ->from($tpuTable)
+                    ->whereColumn($tpuTable . '.perumahanId', $perumahanTable . '.id')
+                    ->whereNotNull($tpuTable . '.noBASTTPU')
+                    ->whereRaw("TRIM({$tpuTable}.noBASTTPU) <> ''");
             })
             ->whereExists(function ($q) use ($psuTable, $perumahanTable) {
                 $q->select(DB::raw(1))
-                  ->from($psuTable)
-                  ->whereColumn($psuTable.'.perumahanId', $perumahanTable.'.id');
+                    ->from($psuTable)
+                    ->whereColumn($psuTable . '.perumahanId', $perumahanTable . '.id')
+                    ->whereNotNull($psuTable . '.noBASTPSU')
+                    ->whereRaw("TRIM({$psuTable}.noBASTPSU) <> ''");
             })
             ->latest()
             ->get();
@@ -508,7 +547,7 @@ class PerumahanDbController extends Controller
         if (is_array($val)) {
             $uuids = [];
             foreach ($val as $v) {
-                $u = $this->extractUuid((string)$v);
+                $u = $this->extractUuid((string) $v);
                 if ($u) $uuids[] = $u;
             }
             $request->merge([$field => array_values(array_unique($uuids))]);
@@ -527,7 +566,7 @@ class PerumahanDbController extends Controller
                 $uuids = [];
                 if (is_array($arr)) {
                     foreach ($arr as $v) {
-                        $u = $this->extractUuid((string)$v);
+                        $u = $this->extractUuid((string) $v);
                         if ($u) $uuids[] = $u;
                     }
                 }
@@ -549,36 +588,6 @@ class PerumahanDbController extends Controller
             $u = $this->extractUuid($t);
             $request->merge([$field => $u ? [$u] : []]);
         }
-    }
-
-    /** Normalisasi string fleksibel: array/JSON → first; ''/"null" → null */
-    private function normalizeFlexibleString(Request $request, string $field): void
-    {
-        if (!$request->has($field)) return;
-
-        $val = $request->input($field);
-        if ($val === null) return;
-
-        if (is_array($val)) {
-            $request->merge([$field => (string) ($val[0] ?? null)]);
-            return;
-        }
-
-        if (is_string($val)) {
-            $t = trim($val);
-            if ($t === '' || strtolower($t) === 'null') {
-                $request->merge([$field => null]);
-                return;
-            }
-            if ($t[0] === '[') {
-                $arr   = json_decode($t, true);
-                $first = is_array($arr) ? ($arr[0] ?? null) : null;
-                $request->merge([$field => $first ? (string)$first : null]);
-            }
-            return;
-        }
-
-        $request->merge([$field => null]);
     }
 
     /** Ambil UUID dari string/path (v1–v5) */
@@ -613,14 +622,14 @@ class PerumahanDbController extends Controller
             // Sudah FINAL
             if ($final->has($u)) {
                 $row = $final->get($u);
-                if ((string)$row->user_id !== (string)$userId) continue;
+                if ((string) $row->user_id !== (string) $userId) continue;
                 if (!$disk->exists($row->file_path)) continue;
 
                 if ($duplicate) {
                     $ext     = pathinfo($row->file_path, PATHINFO_EXTENSION);
                     $newUuid = (string) Str::uuid();
                     $newName = (string) Str::uuid() . ($ext ? ".{$ext}" : '');
-                    $newPath = 'perumahan_final/'.$newName;
+                    $newPath = 'perumahan_final/' . $newName;
 
                     $disk->copy($row->file_path, $newPath);
 
@@ -648,11 +657,11 @@ class PerumahanDbController extends Controller
                 $filename = basename($temp->file_path);
                 $ext      = pathinfo($filename, PATHINFO_EXTENSION);
                 $newName  = $filename;
-                $newPath  = 'perumahan_final/'.$newName;
+                $newPath  = 'perumahan_final/' . $newName;
 
                 if ($disk->exists($newPath)) {
                     $newName = (string) Str::uuid() . ($ext ? ".{$ext}" : '');
-                    $newPath = 'perumahan_final/'.$newName;
+                    $newPath = 'perumahan_final/' . $newName;
                 }
 
                 DB::transaction(function () use ($disk, $temp, $newPath, $userId) {

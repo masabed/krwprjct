@@ -255,247 +255,306 @@ class PSUUsulanFisikBSLController extends Controller
     /** ================== SHOW ==================
      * GET /api/psu/usulan-fisik-bsl/{id}
      */
-    public function show(Request $request, string $id)
-    {
-        $auth = $request->user();
-        if (!$auth) {
-            return response()->json(['success' => false, 'message' => 'Unauthenticated'], 401);
-        }
+   public function show(Request $request, string $id)
+{
+    $auth = $request->user();
+    if (!$auth) {
+        return response()->json(['success' => false, 'message' => 'Unauthenticated'], 401);
+    }
 
-        // 1) Usulan BSL
-        $row = UsulanFisikBSL::find($id);
-        if (!$row) {
-            return response()->json(['success' => false, 'message' => 'Data tidak ditemukan'], 404);
-        }
+    // 1) Usulan BSL
+    $row = UsulanFisikBSL::find($id);
+    if (!$row) {
+        return response()->json(['success' => false, 'message' => 'Data tidak ditemukan'], 404);
+    }
 
-        // 1b) Access control
-        $role    = strtolower((string) ($auth->role ?? ''));
-        $isOwner = (string) ($row->user_id ?? '') === (string) $auth->id;
-        $isPriv  = in_array($role, ['admin', 'admin_bidang', 'pengawas'], true);
-        if (!$isPriv && !$isOwner) {
+    // 1b) Access control
+    $role    = strtolower((string) ($auth->role ?? ''));
+    $isOwner = (string) ($row->user_id ?? '') === (string) $auth->id;
+
+    // Role yang full akses: admin, admin_bidang, operator, pengawas
+    $isPriv  = in_array($role, ['admin', 'admin_bidang', 'operator', 'pengawas'], true);
+
+    if (!$isPriv && !$isOwner) {
+        // User biasa → cek akses berbasis kecamatan & kelurahan
+        $userKec = strtolower(trim((string) ($auth->kecamatan ?? '')));
+        $userKel = strtolower(trim((string) ($auth->kelurahan ?? '')));
+
+        // Kalau user tidak punya kecamatan di profil → tidak boleh lihat
+        if ($userKec === '') {
             return response()->json(['success' => false, 'message' => 'Forbidden'], 403);
         }
 
-        // 2) Perencanaan terkait
-        $perencanaanRows = Perencanaan::where('uuidUsulan', (string) $row->id)
-            ->orderBy('created_at', 'desc')
-            ->get();
-
-        $perencanaanList = $perencanaanRows->map(function ($r) {
-            return [
-                'uuidPerencanaan' => (string) $r->id,
-                'uuidUsulan'      => (string) $r->uuidUsulan,
-                'lembarKontrol'   => $r->lembarKontrol,
-                'nilaiHPS'        => $r->nilaiHPS,
-                'catatanSurvey'   => $r->catatanSurvey,
-                'dokumentasi'     => $p->dokumentasi ?? [],
-                'created_at'      => $r->created_at,
-                'updated_at'      => $r->updated_at,
-            ];
-        })->values();
-
-        // 3) Pembangunan terkait (support string/JSON array)
-        $pembangunanRows = Pembangunan::query()
-            ->where(function ($q) use ($row) {
-                $q->where('uuidUsulan', (string) $row->id)
-                  ->orWhereJsonContains('uuidUsulan', (string) $row->id);
-            })
-            ->orderBy('created_at', 'desc')
-            ->get();
-
-        // 3a) Resolve nama pengawas lapangan
-        $pengawasKeys = $pembangunanRows->pluck('pengawasLapangan')
-            ->filter(fn($v) => !empty($v))
-            ->map(fn($v) => (string) $v)
-            ->unique()
-            ->values();
-
-        $usersById   = collect();
-        $usersByUuid = collect();
-
-        if ($pengawasKeys->isNotEmpty() && class_exists(\App\Models\User::class)) {
-            try {
-                $usersById = \App\Models\User::query()
-                    ->select('id', 'name', 'username')
-                    ->whereIn('id', $pengawasKeys)
-                    ->get()
-                    ->keyBy(fn($u) => (string) $u->id);
-            } catch (\Throwable $e) {
-                $usersById = collect();
-            }
-
-            try {
-                $userTable = (new \App\Models\User)->getTable();
-                if (\Schema::hasColumn($userTable, 'uuid')) {
-                    $usersByUuid = \App\Models\User::query()
-                        ->select('uuid', 'name', 'username')
-                        ->whereIn('uuid', $pengawasKeys)
-                        ->get()
-                        ->keyBy(fn($u) => (string) $u->uuid);
-                }
-            } catch (\Throwable $e) {
-                $usersByUuid = collect();
-            }
+        // Cek kecamatan usulan
+        $itemKec = strtolower(trim((string) ($row->kecamatanUsulan ?? '')));
+        if ($itemKec === '' || $itemKec !== $userKec) {
+            return response()->json(['success' => false, 'message' => 'Forbidden'], 403);
         }
 
-        // 3b) Bentuk list pembangunan + hitung uuidUsulan_count PER ROW
-        $pembangunanList = $pembangunanRows->map(function ($b) use ($usersById, $usersByUuid) {
-            // Normalisasi uuidUsulan → selalu array
-            $uuList = [];
-            $uuRaw  = $b->uuidUsulan;
-
-            if (is_array($uuRaw)) {
-                $uuList = $uuRaw;
-            } elseif (is_string($uuRaw)) {
-                $t = trim($uuRaw);
-                if ($t !== '' && str_starts_with($t, '[')) {
-                    $arr = json_decode($t, true);
-                    $uuList = is_array($arr) ? $arr : [];
-                } elseif ($t !== '') {
-                    // legacy: single string
-                    $uuList = [$t];
-                }
+        // Kalau user punya kelurahan → wajib sama persis (case-insensitive)
+        if ($userKel !== '') {
+            $itemKel = strtolower(trim((string) ($row->kelurahanUsulan ?? '')));
+            if ($itemKel === '' || $itemKel !== $userKel) {
+                return response()->json(['success' => false, 'message' => 'Forbidden'], 403);
             }
-
-            // Hitung jumlah UUID unik & non-empty
-            $uuidUsulanCount = collect($uuList)
-                ->map(fn($v) => trim((string) $v))
-                ->filter(fn($v) => $v !== '')
-                ->unique()
-                ->count();
-
-            // Nama pengawas lapangan
-            $key  = (string) ($b->pengawasLapangan ?? '');
-            $name = null;
-            if ($key !== '') {
-                $u = $usersById->get($key) ?? $usersByUuid->get($key);
-                $name = $u->name ?? $u->username ?? null;
-            }
-
-            return [
-                'uuidPembangunan'       => (string) $b->id,
-                'uuidUsulan'            => $uuList, // sudah array
-                'nomorSPK'              => $b->nomorSPK,
-                'tanggalSPK'            => $b->tanggalSPK,
-                'nilaiKontrak'          => $b->nilaiKontrak,
-                'unit'                  => $b->unit,
-                'kontraktorPelaksana'   => $b->kontraktorPelaksana,
-                'tanggalMulai'          => $b->tanggalMulai,
-                'tanggalSelesai'        => $b->tanggalSelesai,
-                'jangkaWaktu'           => $b->jangkaWaktu,
-                'pengawasLapangan'      => $b->pengawasLapangan,
-                'pengawasLapangan_name' => $name,
-                'uuidUsulan_count'      => $uuidUsulanCount, // <= per-row dari list
-                'created_at'            => $b->created_at,
-                'updated_at'            => $b->updated_at,
-            ];
-        })->values();
-
-        // 4) PENGAWASAN terkait (uuidUsulan sama) + role filter
-        $canSeeAllPengawasan = in_array($role, ['admin', 'admin_bidang', 'pengawas'], true) || $isOwner;
-
-        $pengawasanRows = Pengawasan::query()
-            ->where('uuidUsulan', (string) $row->id)
-            ->when(!$canSeeAllPengawasan, fn($q) => $q->where('pengawas', (string) $auth->id))
-            ->orderByDesc('tanggal_pengawasan')
-            ->orderByDesc('created_at')
-            ->get();
-
-        // extend lookup user untuk pengawas catatan jika belum ter-cover
-        $pengawasCatatanKeys = $pengawasanRows->pluck('pengawas')
-            ->filter(fn($v) => !empty($v))
-            ->map(fn($v) => (string) $v)
-            ->diff($pengawasKeys)
-            ->values();
-
-        if ($pengawasCatatanKeys->isNotEmpty() && class_exists(\App\Models\User::class)) {
-            try {
-                $addById = \App\Models\User::query()
-                    ->select('id', 'name', 'username')
-                    ->whereIn('id', $pengawasCatatanKeys)
-                    ->get()
-                    ->keyBy(fn($u) => (string) $u->id);
-                $usersById = $usersById->merge($addById);
-            } catch (\Throwable $e) {}
-
-            try {
-                $userTable = (new \App\Models\User)->getTable();
-                if (\Schema::hasColumn($userTable, 'uuid')) {
-                    $addByUuid = \App\Models\User::query()
-                        ->select('uuid', 'name', 'username')
-                        ->whereIn('uuid', $pengawasCatatanKeys)
-                        ->get()
-                        ->keyBy(fn($u) => (string) $u->uuid);
-                    $usersByUuid = $usersByUuid->merge($addByUuid);
-                }
-            } catch (\Throwable $e) {}
         }
-
-        $pengawasanList = $pengawasanRows->map(function ($r) use ($usersById, $usersByUuid) {
-            $k  = (string) ($r->pengawas ?? '');
-            $nm = null;
-            if ($k !== '') {
-                $u  = $usersById->get($k) ?? $usersByUuid->get($k);
-                $nm = $u->name ?? $u->username ?? null;
-            }
-
-            return [
-                'id'                 => (string) $r->id,
-                'uuidUsulan'         => (string) $r->uuidUsulan,
-                'uuidPembangunan'    => (string) $r->uuidPembangunan,
-                'pengawas'           => (string) $r->pengawas,
-                'pengawas_name'      => $nm,
-                'tanggal_pengawasan' => $r->tanggal_pengawasan,
-                'foto'               => is_array($r->foto) ? $r->foto : [],
-                'pesan_pengawasan'   => $r->pesan_pengawasan,
-                'created_at'         => $r->created_at,
-                'updated_at'         => $r->updated_at,
-            ];
-        })->values();
-
-        // 5) Response
-        return response()->json([
-            'success' => true,
-            'data'    => [
-                'usulan'      => $row,
-                'perencanaan' => $perencanaanList,
-                'pembangunan' => $pembangunanList,
-                'pengawasan'  => $pengawasanList,
-            ],
-        ]);
     }
+
+    // 2) Perencanaan terkait
+    $perencanaanRows = Perencanaan::where('uuidUsulan', (string) $row->id)
+        ->orderBy('created_at', 'desc')
+        ->get();
+
+    $perencanaanList = $perencanaanRows->map(function ($r) {
+        return [
+            'uuidPerencanaan' => (string) $r->id,
+            'uuidUsulan'      => (string) $r->uuidUsulan,
+            'lembarKontrol'   => $r->lembarKontrol,
+            'nilaiHPS'        => $r->nilaiHPS,
+            'catatanSurvey'   => $r->catatanSurvey,
+            'dokumentasi'     => $r->dokumentasi ?? [],   // <-- perbaikan di sini
+            'created_at'      => $r->created_at,
+            'updated_at'      => $r->updated_at,
+        ];
+    })->values();
+
+    // 3) Pembangunan terkait (support string/JSON array)
+    $pembangunanRows = Pembangunan::query()
+        ->where(function ($q) use ($row) {
+            $q->where('uuidUsulan', (string) $row->id)
+              ->orWhereJsonContains('uuidUsulan', (string) $row->id);
+        })
+        ->orderBy('created_at', 'desc')
+        ->get();
+
+    // 3a) Resolve nama pengawas lapangan
+    $pengawasKeys = $pembangunanRows->pluck('pengawasLapangan')
+        ->filter(fn($v) => !empty($v))
+        ->map(fn($v) => (string) $v)
+        ->unique()
+        ->values();
+
+    $usersById   = collect();
+    $usersByUuid = collect();
+
+    if ($pengawasKeys->isNotEmpty() && class_exists(\App\Models\User::class)) {
+        try {
+            $usersById = \App\Models\User::query()
+                ->select('id', 'name', 'username')
+                ->whereIn('id', $pengawasKeys)
+                ->get()
+                ->keyBy(fn($u) => (string) $u->id);
+        } catch (\Throwable $e) {
+            $usersById = collect();
+        }
+
+        try {
+            $userTable = (new \App\Models\User)->getTable();
+            if (\Schema::hasColumn($userTable, 'uuid')) {
+                $usersByUuid = \App\Models\User::query()
+                    ->select('uuid', 'name', 'username')
+                    ->whereIn('uuid', $pengawasKeys)
+                    ->get()
+                    ->keyBy(fn($u) => (string) $u->uuid);
+            }
+        } catch (\Throwable $e) {
+            $usersByUuid = collect();
+        }
+    }
+
+    // 3b) Bentuk list pembangunan + hitung uuidUsulan_count PER ROW
+    $pembangunanList = $pembangunanRows->map(function ($b) use ($usersById, $usersByUuid) {
+        // Normalisasi uuidUsulan → selalu array
+        $uuList = [];
+        $uuRaw  = $b->uuidUsulan;
+
+        if (is_array($uuRaw)) {
+            $uuList = $uuRaw;
+        } elseif (is_string($uuRaw)) {
+            $t = trim($uuRaw);
+            if ($t !== '' && str_starts_with($t, '[')) {
+                $arr = json_decode($t, true);
+                $uuList = is_array($arr) ? $arr : [];
+            } elseif ($t !== '') {
+                // legacy: single string
+                $uuList = [$t];
+            }
+        }
+
+        // Hitung jumlah UUID unik & non-empty
+        $uuidUsulanCount = collect($uuList)
+            ->map(fn($v) => trim((string) $v))
+            ->filter(fn($v) => $v !== '')
+            ->unique()
+            ->count();
+
+        // Nama pengawas lapangan
+        $key  = (string) ($b->pengawasLapangan ?? '');
+        $name = null;
+        if ($key !== '') {
+            $u = $usersById->get($key) ?? $usersByUuid->get($key);
+            $name = $u->name ?? $u->username ?? null;
+        }
+
+        return [
+            'uuidPembangunan'       => (string) $b->id,
+            'uuidUsulan'            => $uuList, // sudah array
+            'nomorSPK'              => $b->nomorSPK,
+            'tanggalSPK'            => $b->tanggalSPK,
+            'nilaiKontrak'          => $b->nilaiKontrak,
+            'unit'                  => $b->unit,
+            'kontraktorPelaksana'   => $b->kontraktorPelaksana,
+            'tanggalMulai'          => $b->tanggalMulai,
+            'tanggalSelesai'        => $b->tanggalSelesai,
+            'jangkaWaktu'           => $b->jangkaWaktu,
+            'pengawasLapangan'      => $b->pengawasLapangan,
+            'pengawasLapangan_name' => $name,
+            'uuidUsulan_count'      => $uuidUsulanCount,
+            'created_at'            => $b->created_at,
+            'updated_at'            => $b->updated_at,
+        ];
+    })->values();
+
+    // 4) PENGAWASAN terkait (uuidUsulan sama) + role filter
+    $canSeeAllPengawasan = in_array($role, ['admin', 'admin_bidang', 'pengawas'], true) || $isOwner;
+
+    $pengawasanRows = Pengawasan::query()
+        ->where('uuidUsulan', (string) $row->id)
+        ->when(!$canSeeAllPengawasan, fn($q) => $q->where('pengawas', (string) $auth->id))
+        ->orderByDesc('tanggal_pengawasan')
+        ->orderByDesc('created_at')
+        ->get();
+
+    // extend lookup user untuk pengawas catatan jika belum ter-cover
+    $pengawasCatatanKeys = $pengawasanRows->pluck('pengawas')
+        ->filter(fn($v) => !empty($v))
+        ->map(fn($v) => (string) $v)
+        ->diff($pengawasKeys)
+        ->values();
+
+    if ($pengawasCatatanKeys->isNotEmpty() && class_exists(\App\Models\User::class)) {
+        try {
+            $addById = \App\Models\User::query()
+                ->select('id', 'name', 'username')
+                ->whereIn('id', $pengawasCatatanKeys)
+                ->get()
+                ->keyBy(fn($u) => (string) $u->id);
+            $usersById = $usersById->merge($addById);
+        } catch (\Throwable $e) {}
+
+        try {
+            $userTable = (new \App\Models\User)->getTable();
+            if (\Schema::hasColumn($userTable, 'uuid')) {
+                $addByUuid = \App\Models\User::query()
+                    ->select('uuid', 'name', 'username')
+                    ->whereIn('uuid', $pengawasCatatanKeys)
+                    ->get()
+                    ->keyBy(fn($u) => (string) $u->uuid);
+                $usersByUuid = $usersByUuid->merge($addByUuid);
+            }
+        } catch (\Throwable $e) {}
+    }
+
+    $pengawasanList = $pengawasanRows->map(function ($r) use ($usersById, $usersByUuid) {
+        $k  = (string) ($r->pengawas ?? '');
+        $nm = null;
+        if ($k !== '') {
+            $u  = $usersById->get($k) ?? $usersByUuid->get($k);
+            $nm = $u->name ?? $u->username ?? null;
+        }
+
+        return [
+            'id'                 => (string) $r->id,
+            'uuidUsulan'         => (string) $r->uuidUsulan,
+            'uuidPembangunan'    => (string) $r->uuidPembangunan,
+            'pengawas'           => (string) $r->pengawas,
+            'pengawas_name'      => $nm,
+            'tanggal_pengawasan' => $r->tanggal_pengawasan,
+            'foto'               => is_array($r->foto) ? $r->foto : [],
+            'pesan_pengawasan'   => $r->pesan_pengawasan,
+            'created_at'         => $r->created_at,
+            'updated_at'         => $r->updated_at,
+        ];
+    })->values();
+
+    // 5) Response
+    return response()->json([
+        'success' => true,
+        'data'    => [
+            'usulan'      => $row,
+            'perencanaan' => $perencanaanList,
+            'pembangunan' => $pembangunanList,
+            'pengawasan'  => $pengawasanList,
+        ],
+    ]);
+}
 
     /** ================== INDEX ==================
      * GET /api/psu/usulan-fisik-bsl
      * Optional filter: perumahanId
      */
-    public function index(Request $request)
-    {
-        $user = $request->user();
-        if (!$user) {
-            return response()->json(['success' => false, 'message' => 'Unauthenticated'], 401);
-        }
-
-        $role    = strtolower((string) ($user->role ?? ''));
-        $isAdmin = in_array($role, ['admin', 'admin_bidang'], true);
-
-        $q = UsulanFisikBSL::query()->latest();
-
-        // User non-admin hanya melihat data miliknya
-        if (!$isAdmin) {
-            $q->where('user_id', (string) $user->id);
-        }
-
-        // Filter opsional
-        if ($request->has('perumahanId')) {
-            $q->where('perumahanId', $request->query('perumahanId'));
-        }
-
-        return response()->json([
-            'success' => true,
-            'data'    => $q->get(),
-        ]);
+    /** ================== INDEX ==================
+ * GET /api/psu/usulan-fisik-bsl
+ * Optional filter: perumahanId
+ */
+public function index(Request $request)
+{
+    $auth = $request->user();
+    if (!$auth) {
+        return response()->json(['success' => false, 'message' => 'Unauthenticated'], 401);
     }
+
+    $role   = strtolower((string) ($auth->role ?? ''));
+    // Full akses list: admin, admin_bidang, operator, pengawas
+    $isPriv = in_array($role, ['admin', 'admin_bidang', 'operator', 'pengawas'], true);
+
+    $q = UsulanFisikBSL::query()->latest();
+
+    if ($isPriv) {
+        // Kalau mau lihat hanya data milik sendiri → ?mine=1
+        if ($request->boolean('mine')) {
+            $q->where('user_id', (string) $auth->id);
+        }
+    } else {
+        // User biasa: filter berdasar user_id + kecamatanUsulan/kelurahanUsulan
+        $userKec = strtolower(trim((string) ($auth->kecamatan ?? '')));
+        $userKel = strtolower(trim((string) ($auth->kelurahan ?? '')));
+
+        if ($userKec === '') {
+            // Tidak punya kecamatan di profil → hanya data miliknya
+            $q->where('user_id', (string) $auth->id);
+        } else {
+            // Boleh:
+            // - data miliknya sendiri
+            // - semua usulan di kecamatanUsulan yg sama
+            //   - jika kelurahan user kosong → semua kelurahanUsulan di kecamatan tsb
+            //   - jika kelurahan user ada → hanya kelurahanUsulan tsb
+            $q->where(function ($qq) use ($auth, $userKec, $userKel) {
+                $qq->where('user_id', (string) $auth->id)
+                   ->orWhere(function ($sub) use ($userKec, $userKel) {
+                       $sub->whereRaw('LOWER(kecamatanUsulan) = ?', [$userKec]);
+
+                       if ($userKel !== '') {
+                           // ✅ FIX DI SINI: pakai '' bukan \"\"
+                           $sub->whereRaw("LOWER(COALESCE(kelurahanUsulan, '')) = ?", [$userKel]);
+                       }
+                   });
+            });
+        }
+    }
+
+    // Filter opsional perumahanId
+    if ($request->has('perumahanId')) {
+        $q->where('perumahanId', $request->query('perumahanId'));
+    }
+
+    return response()->json([
+        'success' => true,
+        'data'    => $q->get(),
+    ]);
+}
+
+
 
     /** ================== DESTROY ==================
      * DELETE /api/psu/usulan-fisik-bsl/{id}

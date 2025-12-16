@@ -22,7 +22,9 @@ class User extends Authenticatable implements JWTSubject
         'email',
         'password',
         'role',
-        'noHP',      // nomor HP user
+        'noHP',  
+         'kecamatan',
+    'kelurahan',    // nomor HP user
         'avatar_path',  // path file avatar di disk public
     ];
 

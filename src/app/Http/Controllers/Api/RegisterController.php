@@ -21,6 +21,8 @@ class RegisterController extends Controller
      *  - role               (required: admin, admin_bidang, operator, pengawas, user)
      *  - email              (optional)
      *  - noHP / no_hp       (optional)
+     *  - kecamatan          (optional)
+     *  - kelurahan          (optional)
      *  - avatar             (optional image: jpg/jpeg/png/webp, max 2MB)
      *
      * HANYA BISA DIAKSES OLEH ROLE admin atau admin_bidang
@@ -61,6 +63,10 @@ class RegisterController extends Controller
             // noHP opsional
             'noHP'                  => 'sometimes|nullable|string|max:30',
 
+            // kecamatan & kelurahan opsional
+            'kecamatan'             => 'sometimes|nullable|string|max:100',
+            'kelurahan'             => 'sometimes|nullable|string|max:100',
+
             'password'              => [
                 'required',
                 'string',
@@ -90,12 +96,14 @@ class RegisterController extends Controller
 
         // --- BUAT USER BARU ---
         $user = User::create([
-            'name'     => $request->name,
-            'username' => $request->username,
-            'email'    => $request->email ?? null,
-            'noHP'     => $request->noHP ?? null,
-            'password' => $request->password, // pakai cast 'hashed' di model
-            'role'     => $request->role ?? 'user',
+            'name'      => $request->name,
+            'username'  => $request->username,
+            'email'     => $request->email ?? null,
+            'noHP'      => $request->noHP ?? null,
+            'kecamatan' => $request->kecamatan ?? null,
+            'kelurahan' => $request->kelurahan ?? null,
+            'password'  => $request->password, // pakai cast 'hashed' di model
+            'role'      => $request->role ?? 'user',
         ]);
 
         // --- SIMPAN AVATAR JIKA ADA ---
@@ -124,6 +132,8 @@ class RegisterController extends Controller
                 'username'   => $user->username,
                 'email'      => $user->email,
                 'noHP'       => $user->noHP,
+                'kecamatan'  => $user->kecamatan,
+                'kelurahan'  => $user->kelurahan,
                 'role'       => $user->role,
                 'avatar_url' => $user->avatar_url, // accessor di model
                 'created_at' => $user->created_at,

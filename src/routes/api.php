@@ -2,6 +2,7 @@
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\Api\DashboardController;
 use App\Http\Controllers\Api\LoginController;
 use App\Http\Controllers\Api\ViewUserController;
 use App\Http\Controllers\Api\UserManagementController;
@@ -58,7 +59,8 @@ Route::middleware('auth:api')->group(function () {
 
 // Semua route lain (per modul)
 Route::middleware('auth:api')->group(function () {
-
+//Dashboard
+Route::get('/dashboard', [DashboardController::class, 'index']);
     // ================= POKIR =================
     Route::get('/pokir', [PokirController::class, 'index']);
     Route::get('/pokir/{uuid}', [PokirController::class, 'show']);

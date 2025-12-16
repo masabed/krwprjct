@@ -17,6 +17,9 @@ class PsuSerahTerima extends Model
         'id',
         'perumahanId',
 
+        // Lokasi
+        'titikLokasi',
+
         // Pemohon
         'tipePengaju',
         'namaPemohon',
@@ -77,9 +80,10 @@ class PsuSerahTerima extends Model
 
         // scalar
         'status_verifikasi_usulan' => 'integer',
+        'titikLokasi'              => 'string',
 
-        // jenisPSU kini JSON (array of strings)
-        'jenisPSU'          => 'array',
+        // jenisPSU JSON (array of strings)
+        'jenisPSU' => 'array',
 
         // json arrays (nullable)
         'dokumenIzinBangunan'       => 'array',

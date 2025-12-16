@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\Psu;
 use App\Http\Controllers\Controller;
 use App\Models\PsuSerahTerima;
 use App\Models\PSUUploadTemp;
+use App\Models\PerumahanDb;
 use App\Models\PSUUpload;
 use App\Models\Perencanaan;
 use App\Models\Pembangunan;
@@ -82,9 +83,13 @@ class PsuSerahTerimaController extends Controller
         }
         $this->normalizeStringArrayField($request, 'jenisPSU');
         // noBASTPSU: string biasa → tidak dinormalisasi sebagai array
+        // titikLokasi: string biasa → tidak dinormalisasi sebagai array
 
         $validated = $request->validate([
             'perumahanId'        => ['required', 'uuid'],
+
+            // Lokasi (BARU)
+            'titikLokasi'        => ['sometimes', 'nullable', 'string', 'max:255'],
 
             // Pemohon
             'tipePengaju'        => ['sometimes', 'string', 'max:100'],
@@ -211,9 +216,13 @@ class PsuSerahTerimaController extends Controller
             $this->normalizeStringArrayField($request, 'jenisPSU');
         }
         // TIDAK menormalisasi noBASTPSU (string apa adanya)
+        // TIDAK menormalisasi titikLokasi (string apa adanya)
 
         $validated = $request->validate([
             'perumahanId'        => ['sometimes', 'uuid'],
+
+            // Lokasi (BARU)
+            'titikLokasi'        => ['sometimes', 'nullable', 'string', 'max:255'],
 
             // Pemohon
             'tipePengaju'        => ['sometimes', 'string', 'max:100'],
@@ -353,18 +362,46 @@ class PsuSerahTerimaController extends Controller
         ], 404);
     }
 
-    // 1b) Access control
+    // 1a) Role dasar
     $role    = strtolower((string) ($auth->role ?? ''));
     $isOwner = (string) ($data->user_id ?? '') === (string) $auth->id;
-
-    // role yang dianggap privileged:
-    // - admin (legacy)
-    // - admin_bidang
-    // - operator
-    // - pengawas
     $isPriv  = in_array($role, ['admin','admin_bidang','operator','pengawas'], true);
 
-    if (!$isPriv && !$isOwner) {
+    // 1b) Normalisasi kecamatan/kelurahan user (kalau ada di profil)
+    $userKecamatan = Str::lower(trim((string) ($auth->kecamatan ?? '')));
+    $userKelurahan = Str::lower(trim((string) ($auth->kelurahan ?? '')));
+
+    $allowed = false;
+
+    if ($isPriv || $isOwner) {
+        // Admin / admin_bidang / operator / pengawas ATAU owner → selalu boleh
+        $allowed = true;
+    } else {
+        // User biasa → cek kecamatan/kelurahan lewat PerumahanDb
+        if ($userKecamatan !== '') {
+            $perumahanId = $data->perumahanId ?? null;
+            if ($perumahanId) {
+                $perumahan = PerumahanDb::find($perumahanId);
+
+                if ($perumahan) {
+                    $perKec = Str::lower(trim((string) ($perumahan->kecamatan ?? '')));
+                    $perKel = Str::lower(trim((string) ($perumahan->kelurahan ?? '')));
+
+                    if ($perKec !== '') {
+                        if ($userKelurahan === '') {
+                            // User tidak punya kelurahan → boleh semua kelurahan di kecamatan tsb
+                            $allowed = ($perKec === $userKecamatan);
+                        } else {
+                            // User punya kelurahan → harus match kecamatan & kelurahan
+                            $allowed = ($perKec === $userKecamatan && $perKel === $userKelurahan);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (!$allowed) {
         return response()->json([
             'success' => false,
             'message' => 'Unauthorized',
@@ -382,14 +419,13 @@ class PsuSerahTerimaController extends Controller
             'uuidUsulan'      => (string) $row->uuidUsulan,
             'nilaiHPS'        => $row->nilaiHPS,
             'lembarKontrol'   => $row->lembarKontrol,
-            'dokumentasi'     => $row->dokumentasi, // field baru dokumentasi (array UUID gambar)
+            'dokumentasi'     => $row->dokumentasi ?? [],  // aman kalau null
             'catatanSurvey'   => $row->catatanSurvey,
             'created_at'      => $row->created_at,
             'updated_at'      => $row->updated_at,
         ];
     })->values();
 
-    // 3) RESPONSE: usulan + perencanaan saja
     return response()->json([
         'success' => true,
         'data'    => [
@@ -402,35 +438,84 @@ class PsuSerahTerimaController extends Controller
 
     /** GET /api/psu/serah-terima */
     public function index(Request $request)
-    {
-        $user = $request->user();
-        if (!$user) {
-            return response()->json(['success' => false, 'message' => 'Unauthenticated'], 401);
-        }
+{
+    $user = $request->user();
+    if (!$user) {
+        return response()->json([
+            'success' => false,
+            'message' => 'Unauthenticated',
+        ], 401);
+    }
 
-        $role    = strtolower((string) ($user->role ?? ''));
-        $isAdmin = in_array($role, ['admin', 'admin_bidang'], true);
+    $role   = strtolower((string) ($user->role ?? ''));
+    // Yang boleh lihat SEMUA data PSU Serah Terima:
+    // admin, admin_bidang, operator, pengawas
+    $isPriv = in_array($role, ['admin', 'admin_bidang', 'operator', 'pengawas'], true);
 
-        $q = PsuSerahTerima::query()->latest();
+    // Normalisasi kecamatan & kelurahan user → lowercase + trim
+    $userKecamatan = Str::lower(trim((string) ($user->kecamatan ?? '')));
+    $userKelurahan = Str::lower(trim((string) ($user->kelurahan ?? '')));
 
-        // User biasa hanya melihat data miliknya
-        if (!$isAdmin) {
+    $q = PsuSerahTerima::query()->latest();
+
+    if ($isPriv) {
+        // Privileged roles boleh lihat semua;
+        // kalau mau hanya data miliknya, gunakan ?mine=1
+        if ($request->boolean('mine')) {
             $q->where('user_id', (string) $user->id);
         }
+    } else {
+        // User biasa
 
-        // Filter opsional
-        if ($request->has('status_verifikasi_usulan')) {
-            $q->where('status_verifikasi_usulan', (int) $request->query('status_verifikasi_usulan'));
-        }
-        if ($request->has('perumahanId')) {
-            $q->where('perumahanId', $request->query('perumahanId'));
-        }
+        if ($userKecamatan === '') {
+            // Tidak ada info kecamatan di profil → fallback: hanya data milik sendiri
+            $q->where('user_id', (string) $user->id);
+        } else {
+            // Cari perumahan di kecamatan (dan kelurahan kalau ada) user
+            $perumahanQuery = PerumahanDb::query()
+                ->whereRaw('LOWER(kecamatan) = ?', [$userKecamatan]);
 
-        return response()->json([
-            'success' => true,
-            'data'    => $q->get(),
-        ]);
+            if ($userKelurahan !== '') {
+                // Kalau user punya kelurahan, strict ke kelurahan yg sama
+                $perumahanQuery->whereRaw('LOWER(kelurahan) = ?', [$userKelurahan]);
+            }
+
+            $allowedPerumahanIds = $perumahanQuery
+                ->pluck('id')
+                ->filter(fn ($v) => !is_null($v))
+                ->unique()
+                ->values();
+
+            $q->where(function ($sub) use ($user, $allowedPerumahanIds) {
+                // 1) selalu boleh data milik sendiri
+                $sub->where('user_id', (string) $user->id);
+
+                // 2) plus data yang perumahanId-nya ada di perumahans_db yang sesuai
+                if ($allowedPerumahanIds->isNotEmpty()) {
+                    $sub->orWhereIn('perumahanId', $allowedPerumahanIds);
+                }
+            });
+        }
     }
+
+    // Filter opsional
+    if ($request->has('status_verifikasi_usulan')) {
+        $q->where(
+            'status_verifikasi_usulan',
+            (int) $request->query('status_verifikasi_usulan')
+        );
+    }
+
+    if ($request->has('perumahanId')) {
+        $q->where('perumahanId', $request->query('perumahanId'));
+    }
+
+    return response()->json([
+        'success' => true,
+        'data'    => $q->get(),
+    ]);
+}
+
 
     /** DELETE /api/psu/serah-terima/{id} */
     public function destroy(string $id)

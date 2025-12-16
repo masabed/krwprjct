@@ -28,7 +28,7 @@ class UserManagementController extends Controller
     }
 
     /**
-     * PATCH /api/users/{id}
+     * POST /api/users/update/{id}
      * Update profil user.
      * - Admin / admin_bidang bisa update user mana pun (termasuk password, tanpa old_password).
      * - User biasa hanya bisa update dirinya sendiri.
@@ -42,9 +42,9 @@ class UserManagementController extends Controller
             return response()->json(['error' => 'Unauthenticated.'], 401);
         }
 
-        // Normalisasi noHP -> no_hp
-        if ($request->has('noHP') && !$request->has('no_hp')) {
-            $request->merge(['no_hp' => $request->input('noHP')]);
+        // Normalisasi: kalau klien kirim no_hp → isi ke noHP (DB pakai noHP)
+        if ($request->has('no_hp') && !$request->has('noHP')) {
+            $request->merge(['noHP' => $request->input('no_hp')]);
         }
 
         $target = $this->resolveTargetUser($actor, $id);
@@ -68,7 +68,9 @@ class UserManagementController extends Controller
                 'email',
                 Rule::unique('users','email')->ignore($target->id, 'id'),
             ],
-            'no_hp'         => ['sometimes','nullable','string','max:30'],
+            'noHP'          => ['sometimes','nullable','string','max:30'],
+            'kecamatan'     => ['sometimes','nullable','string','max:100'],
+            'kelurahan'     => ['sometimes','nullable','string','max:100'],
             'avatar'        => ['sometimes','file','image','mimes:jpg,jpeg,png,webp','max:2048'],
             'delete_avatar' => ['sometimes','boolean'],
         ];
@@ -79,7 +81,7 @@ class UserManagementController extends Controller
         }
 
         // ---------- PASSWORD RULES ----------
-        // Admin: boleh ganti password tanpa old_password
+        // Admin / admin_bidang: boleh ganti password tanpa old_password
         $rules['password'] = [
             'sometimes',
             'string',
@@ -128,9 +130,19 @@ class UserManagementController extends Controller
             $dirty[] = 'email';
         }
 
-        if ($request->has('no_hp')) {
-            $target->no_hp = $request->no_hp;
-            $dirty[] = 'no_hp';
+        if ($request->has('noHP')) {
+            $target->noHP = $request->noHP;
+            $dirty[] = 'noHP';
+        }
+
+        if ($request->has('kecamatan')) {
+            $target->kecamatan = $request->kecamatan;
+            $dirty[] = 'kecamatan';
+        }
+
+        if ($request->has('kelurahan')) {
+            $target->kelurahan = $request->kelurahan;
+            $dirty[] = 'kelurahan';
         }
 
         // ROLE hanya boleh diubah admin / admin_bidang
@@ -158,7 +170,7 @@ class UserManagementController extends Controller
                 ?: $request->file('avatar')->extension()
                 ?: 'jpg'
             );
-            $filename = 'avatar-'.Str::uuid().'.'.$ext;
+            $filename = 'avatar-' . Str::uuid() . '.' . $ext;
             $path     = $request->file('avatar')->storeAs('avatars/'.$target->id, $filename, 'public');
 
             $target->avatar_path = $path;
@@ -194,7 +206,9 @@ class UserManagementController extends Controller
                 'name'       => $target->name,
                 'username'   => $target->username,
                 'email'      => $target->email,
-                'no_hp'      => $target->no_hp,
+                'noHP'       => $target->noHP,
+                'kecamatan'  => $target->kecamatan,
+                'kelurahan'  => $target->kelurahan,
                 'role'       => $target->role,
                 'avatar_url' => $target->avatar_url ?? null,
                 'updated_at' => $target->updated_at,

@@ -80,7 +80,7 @@ class PerencanaanController extends Controller
     public function upload(Request $request)
     {
         $request->validate([
-            'file' => 'required|file|mimes:pdf,jpg,jpeg,png|max:4096',
+            'file' => 'required|file|mimes:pdf,jpg,jpeg,png|max:10512',
         ]);
 
         $user = $request->user();
