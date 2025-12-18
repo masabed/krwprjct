@@ -72,7 +72,8 @@ class PermukimanController extends Controller
     $role   = strtolower((string) ($user->role ?? ''));
     $isPriv = in_array($role, ['admin', 'admin_bidang', 'operator', 'pengawas'], true);
 
-    $q = Permukiman::query();
+    // ✅ eager load user utk ambil name (tanpa N+1)
+    $q = \App\Models\Permukiman::query()->with(['user:id,name']);
 
     // === Akses kontrol untuk user biasa ===
     if (!$isPriv) {
@@ -81,19 +82,18 @@ class PermukimanController extends Controller
         $userKel = trim((string) ($user->kelurahan ?? ''));
 
         $q->where(function ($w) use ($userId, $userKec, $userKel) {
-            // Selalu boleh lihat usulan miliknya sendiri
+            // selalu boleh lihat data miliknya
             $w->where('user_id', $userId);
 
-            // Jika punya kecamatan → boleh lihat data sekecamatan
+            // kalau punya kecamatan → boleh lihat data sekecamatan
             if ($userKec !== '') {
                 $w->orWhere(function ($ww) use ($userKec, $userKel) {
                     $ww->where('kecamatan', $userKec);
 
-                    // Jika user punya kelurahan → batasi ke kelurahan itu saja
+                    // kalau user punya kelurahan → batasi kelurahan itu
                     if ($userKel !== '') {
                         $ww->where('kelurahan', $userKel);
                     }
-                    // Kalau kelurahan user kosong → semua kelurahan di kecamatan tsb boleh diakses
                 });
             }
         });
@@ -114,7 +114,20 @@ class PermukimanController extends Controller
         });
     }
 
-    $data = $q->latest()->get();
+    $rows = $q->latest()->get();
+
+    // ✅ tambahkan user_name saja, hilangkan object "user"
+    $data = $rows->map(function ($item) {
+        $arr = $item->toArray();
+
+        // buang relasi biar response gak kebanyakan
+        unset($arr['user']);
+
+        // tambah user_name
+        $arr['user_name'] = $item->user?->name;
+
+        return $arr;
+    });
 
     return response()->json([
         'success' => true,
@@ -122,6 +135,7 @@ class PermukimanController extends Controller
         'data'    => $data,
     ]);
 }
+
 
 /**
  * GET /permukiman/{id} (detail by PK string)
@@ -450,185 +464,266 @@ public function show(string $id)
      * POST /permukiman/update/{id}
      * Partial update; kolom file: ARRAY UUID
      */
-    public function update(Request $request, string $id)
-    {
-        if (!auth()->check()) {
-            return response()->json(['success' => false, 'message' => 'Unauthenticated'], 401);
-        }
-
-        $item = Permukiman::find($id);
-        if (!$item) {
-            return response()->json(['success' => false, 'message' => 'Data tidak ditemukan'], 404);
-        }
-
-        $this->applyAliases($request);
-
-        // Normalisasi semua file-array
-        foreach (self::FILE_ARRAY_FIELDS as $f) {
-            $this->normalizeUuidArrayField($request, $f);
-        }
-
-        $validated = $request->validate([
-            'sumber_usulan'                 => 'sometimes|string|max:255',
-            'jenis_usulan'                  => 'sometimes|string|max:255',
-            'nama_pengusul'                 => 'sometimes|string|max:255',
-            'no_kontak_pengusul'            => 'sometimes|string|max:50',
-            'email'                         => 'sometimes|email',
-            'instansi'                      => 'sometimes|string|max:255',
-            'alamat_dusun_instansi'         => 'sometimes|string|max:255',
-            'alamat_rt_instansi'            => 'sometimes|string|max:10',
-            'alamat_rw_instansi'            => 'sometimes|string|max:10',
-            'tanggal_usulan'                => 'sometimes|date',
-            'nama_pic'                      => 'sometimes|string|max:255',
-            'no_kontak_pic'                 => 'sometimes|string|max:50',
-            'status_tanah'                  => 'sometimes|string|max:100',
-            'panjang_usulan'                => 'sometimes|string|max:100',
-            'alamat_dusun_usulan'           => 'sometimes|string|max:255',
-            'alamat_rt_usulan'              => 'sometimes|string|max:10',
-            'alamat_rw_usulan'              => 'sometimes|string|max:10',
-            'kecamatan'                     => 'sometimes|string|max:100',
-            'kelurahan'                     => 'sometimes|string|max:100',
-            'titik_lokasi'                  => 'sometimes|string|max:255',
-            'pesan_verifikasi'              => 'sometimes|nullable|string|max:512',
-
-            // FILE ARRAYS (nullable → kalau null dikirim, abaikan di payload)
-            'foto_sertifikat_status_tanah'   => 'sometimes|nullable|array|min:1|max:1',
-            'foto_sertifikat_status_tanah.*' => 'uuid',
-            'foto_sta0'                      => 'sometimes|nullable|array|min:1|max:1',
-            'foto_sta0.*'                    => 'uuid',
-            'foto_sta100'                    => 'sometimes|nullable|array|min:1|max:1',
-            'foto_sta100.*'                  => 'uuid',
-            'surat_pemohonan'                => 'sometimes|nullable|array|min:1|max:1',
-            'surat_pemohonan.*'              => 'uuid',
-
-            'status_verifikasi_usulan'       => 'sometimes|integer|in:0,1,2,3,4,5,6,7,8,9',
-        ]);
-
-        // AUTO-CLEAR PESAN SAAT STATUS ≥ 4
-        if (array_key_exists('status_verifikasi_usulan', $validated)
-            && (int)$validated['status_verifikasi_usulan'] >= 4) {
-            $validated['pesan_verifikasi'] = null;
-        }
-
-        // UUID baru yang harus dipindah
-        $uuidsToMove = [];
-        foreach (self::FILE_ARRAY_FIELDS as $f) {
-            if ($request->has($f) && is_array($request->input($f))) {
-                $incoming = $request->input($f);
-                $existing = $item->getAttribute($f) ?? [];
-                $diff     = array_diff($incoming, is_array($existing) ? $existing : []);
-                if (!empty($diff)) {
-                    $uuidsToMove = array_merge($uuidsToMove, $diff);
-                }
-            }
-        }
-        if (!empty($uuidsToMove)) {
-            $this->moveTempToFinalUuids($uuidsToMove, (string) auth()->id());
-        }
-
-        // Payload update (jangan tulis kolom file kalau null)
-        $updateData = $validated;
-        foreach (self::FILE_ARRAY_FIELDS as $f) {
-            if (array_key_exists($f, $updateData) && is_null($updateData[$f])) {
-                unset($updateData[$f]);
-            }
-        }
-
-        // Catat field yang berubah
-        $changedFields = [];
-        foreach ($updateData as $key => $val) {
-            if ($item->getAttribute($key) !== $val) {
-                $changedFields[] = $key;
-            }
-        }
-
-        if (!empty($updateData)) {
-            $item->update($updateData);
-        }
-
-        $message = empty($changedFields)
-            ? 'Tidak ada perubahan data'
-            : 'Field Berikut Berhasil di Perbaharui: ' . implode(', ', $changedFields);
-
-        return response()->json([
-            'success' => true,
-            'message' => $message,
-        ]);
+   public function update(Request $request, string $id)
+{
+    $auth = auth()->user();
+    if (!$auth) {
+        return response()->json(['success' => false, 'message' => 'Unauthenticated'], 401);
     }
+
+    $item = Permukiman::find($id);
+    if (!$item) {
+        return response()->json(['success' => false, 'message' => 'Data tidak ditemukan'], 404);
+    }
+
+    // === ACCESS CONTROL: admin / operator / owner ===
+    $role     = strtolower((string) ($auth->role ?? ''));
+    $isAdmin  = ($role === 'admin');
+    $isOper   = ($role === 'operator');
+    $isOwner  = (string) ($item->user_id ?? '') === (string) ($auth->id ?? '');
+
+    if (!($isAdmin || $isOper || $isOwner)) {
+        return response()->json([
+            'success' => false,
+            'message' => 'Unauthorized. Hanya admin, operator, atau pemilik data yang bisa mengedit.',
+        ], 403);
+    }
+
+    $this->applyAliases($request);
+
+    // Normalisasi semua file-array
+    foreach (self::FILE_ARRAY_FIELDS as $f) {
+        $this->normalizeUuidArrayField($request, $f);
+    }
+
+    $validated = $request->validate([
+        'sumber_usulan'                 => 'sometimes|string|max:255',
+        'jenis_usulan'                  => 'sometimes|string|max:255',
+        'nama_pengusul'                 => 'sometimes|string|max:255',
+        'no_kontak_pengusul'            => 'sometimes|string|max:50',
+        'email'                         => 'sometimes|email',
+        'instansi'                      => 'sometimes|string|max:255',
+        'alamat_dusun_instansi'         => 'sometimes|string|max:255',
+        'alamat_rt_instansi'            => 'sometimes|string|max:10',
+        'alamat_rw_instansi'            => 'sometimes|string|max:10',
+        'tanggal_usulan'                => 'sometimes|date',
+        'nama_pic'                      => 'sometimes|string|max:255',
+        'no_kontak_pic'                 => 'sometimes|string|max:50',
+        'status_tanah'                  => 'sometimes|string|max:100',
+        'panjang_usulan'                => 'sometimes|string|max:100',
+        'alamat_dusun_usulan'           => 'sometimes|string|max:255',
+        'alamat_rt_usulan'              => 'sometimes|string|max:10',
+        'alamat_rw_usulan'              => 'sometimes|string|max:10',
+        'kecamatan'                     => 'sometimes|string|max:100',
+        'kelurahan'                     => 'sometimes|string|max:100',
+        'titik_lokasi'                  => 'sometimes|string|max:255',
+        'pesan_verifikasi'              => 'sometimes|nullable|string|max:512',
+
+        'foto_sertifikat_status_tanah'   => 'sometimes|nullable|array|min:1|max:1',
+        'foto_sertifikat_status_tanah.*' => 'uuid',
+        'foto_sta0'                      => 'sometimes|nullable|array|min:1|max:1',
+        'foto_sta0.*'                    => 'uuid',
+        'foto_sta100'                    => 'sometimes|nullable|array|min:1|max:1',
+        'foto_sta100.*'                  => 'uuid',
+        'surat_pemohonan'                => 'sometimes|nullable|array|min:1|max:1',
+        'surat_pemohonan.*'              => 'uuid',
+
+        'status_verifikasi_usulan'       => 'sometimes|integer|in:0,1,2,3,4,5,6,7,8,9',
+    ]);
+
+    // AUTO-CLEAR PESAN SAAT STATUS ≥ 4
+    if (array_key_exists('status_verifikasi_usulan', $validated)
+        && (int)$validated['status_verifikasi_usulan'] >= 4) {
+        $validated['pesan_verifikasi'] = null;
+    }
+
+    // UUID baru yang harus dipindah
+    $uuidsToMove = [];
+    foreach (self::FILE_ARRAY_FIELDS as $f) {
+        if ($request->has($f) && is_array($request->input($f))) {
+            $incoming = $request->input($f);
+            $existing = $item->getAttribute($f) ?? [];
+            $diff     = array_diff($incoming, is_array($existing) ? $existing : []);
+            if (!empty($diff)) {
+                $uuidsToMove = array_merge($uuidsToMove, $diff);
+            }
+        }
+    }
+
+    if (!empty($uuidsToMove)) {
+        $this->moveTempToFinalUuids($uuidsToMove, (string) auth()->id());
+    }
+
+    // Payload update (jangan tulis kolom file kalau null)
+    $updateData = $validated;
+    foreach (self::FILE_ARRAY_FIELDS as $f) {
+        if (array_key_exists($f, $updateData) && is_null($updateData[$f])) {
+            unset($updateData[$f]);
+        }
+    }
+
+    // Catat field yang berubah
+    $changedFields = [];
+    foreach ($updateData as $key => $val) {
+        if ($item->getAttribute($key) !== $val) {
+            $changedFields[] = $key;
+        }
+    }
+
+    if (!empty($updateData)) {
+        $item->update($updateData);
+    }
+
+    $message = empty($changedFields)
+        ? 'Tidak ada perubahan data'
+        : 'Field Berikut Berhasil di Perbaharui: ' . implode(', ', $changedFields);
+
+    return response()->json([
+        'success' => true,
+        'message' => $message,
+    ]);
+}
 
     /**
      * DELETE /permukiman/{id}
      */
-    public function destroy(string $id)
-    {
-        if (!auth()->check()) {
-            return response()->json(['success' => false, 'message' => 'Unauthenticated'], 401);
+    /**
+ * DELETE /permukiman/{id}
+ * Akses: admin, operator, owner
+ */
+public function destroy(string $id)
+{
+    $auth = auth()->user();
+    if (!$auth) {
+        return response()->json(['success' => false, 'message' => 'Unauthenticated'], 401);
+    }
+
+    /** @var \App\Models\Permukiman|null $data */
+    $data = Permukiman::find($id);
+    if (!$data) {
+        return response()->json([
+            'success' => false,
+            'message' => 'Data tidak ditemukan',
+        ], 404);
+    }
+
+    // === ACCESS CONTROL: admin / operator / owner ===
+    $role    = strtolower((string) ($auth->role ?? ''));
+    $isAdmin = ($role === 'admin');
+    $isOper  = ($role === 'operator');
+    $isOwner = (string) ($data->user_id ?? '') === (string) ($auth->id ?? '');
+
+    if (!($isAdmin || $isOper || $isOwner)) {
+        return response()->json([
+            'success' => false,
+            'message' => 'Unauthorized. Anda Tidak Berwenang.',
+        ], 403);
+    }
+
+    // 0) Kumpulkan semua UUID file dari row Permukiman
+    $fileUuids = [];
+    foreach (self::FILE_ARRAY_FIELDS as $f) {
+        $arr = $data->getAttribute($f);
+        if (is_array($arr)) {
+            $fileUuids = array_merge($fileUuids, $arr);
         }
+    }
+    $fileUuids = array_values(array_unique(array_filter($fileUuids)));
 
-        /** @var \App\Models\Permukiman|null $data */
-        $data = \App\Models\Permukiman::where('id', $id)->first();
-        if (!$data) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Data tidak ditemukan',
-            ], 404);
-        }
+    // Ambil path file FINAL/TEMP untuk dihapus setelah transaksi sukses
+    $finalPaths = [];
+    $tempPaths  = [];
 
-        \DB::transaction(function () use ($id, $data) {
-            // 1) Hapus seluruh Perencanaan yang menempel ke usulan ini
-            \App\Models\Perencanaan::where('uuidUsulan', $id)->delete();
+    if ($fileUuids) {
+        $finalPaths = PermukimanUpload::whereIn('uuid', $fileUuids)
+            ->pluck('file_path')->filter()->values()->all();
 
-            // 2) Cabut UUID usulan ini dari semua row Pembangunan terkait
-            $buildRows = \App\Models\Pembangunan::query()
-                ->where(function($q) use ($id) {
-                    $q->where('uuidUsulan', $id)
-                      ->orWhereJsonContains('uuidUsulan', $id);
-                })
-                ->get();
+        $tempPaths = PermukimanUploadTemp::whereIn('uuid', $fileUuids)
+            ->pluck('file_path')->filter()->values()->all();
+    }
 
-            $needleLower = strtolower($id);
+    DB::transaction(function () use ($id, $data, $fileUuids) {
+        // 1) Hapus Perencanaan terkait
+        Perencanaan::where('uuidUsulan', $id)->delete();
 
-            foreach ($buildRows as $b) {
-                $raw = $b->getAttribute('uuidUsulan');
+        // 2) Hapus Pengawasan terkait
+        Pengawasan::where('uuidUsulan', $id)->delete();
 
-                // Normalisasi ke array
-                if (is_array($raw)) {
-                    $arr = $raw;
-                } elseif (is_string($raw)) {
-                    $t = trim($raw);
-                    if ($t !== '' && str_starts_with($t, '[')) {
-                        $dec = json_decode($t, true);
-                        $arr = is_array($dec) ? $dec : [];
-                    } elseif ($t !== '') {
-                        $arr = [$t]; // legacy single
-                    } else {
-                        $arr = [];
-                    }
+        // 3) Cabut ID usulan dari semua row Pembangunan terkait
+        $buildRows = Pembangunan::query()
+            ->where(function ($q) use ($id) {
+                $q->whereJsonContains('uuidUsulan', $id)
+                  ->orWhere('uuidUsulan', $id) // legacy single-string (kalau pernah ada)
+                  ->orWhere('uuidUsulan', 'like', '%"'.$id.'"%'); // jaga-jaga format text JSON
+            })
+            ->get();
+
+        $needleLower = strtolower($id);
+
+        foreach ($buildRows as $b) {
+            $raw = $b->getAttribute('uuidUsulan');
+
+            // normalisasi ke array
+            if (is_array($raw)) {
+                $arr = $raw;
+            } elseif (is_string($raw)) {
+                $t = trim($raw);
+                if ($t !== '' && str_starts_with($t, '[')) {
+                    $dec = json_decode($t, true);
+                    $arr = is_array($dec) ? $dec : [];
+                } elseif ($t !== '') {
+                    $arr = [$t];
                 } else {
                     $arr = [];
                 }
-
-                // Filter keluar id target (case-insensitive)
-                $after = collect($arr)
-                    ->map(fn($v) => trim((string)$v))
-                    ->filter(fn($v) => $v !== '' && strtolower($v) !== $needleLower)
-                    ->values()
-                    ->all();
-
-                // Simpan balik (kosong → null)
-                $b->uuidUsulan = $after ? $after : null;
-                $b->save();
+            } else {
+                $arr = [];
             }
 
-            // 3) Hapus usulan Permukiman utamanya
-            $data->delete();
-        });
+            $after = collect($arr)
+                ->map(fn ($v) => trim((string) $v))
+                ->filter(fn ($v) => $v !== '' && strtolower($v) !== $needleLower)
+                ->values()
+                ->all();
 
-        return response()->json([
-            'success' => true,
-            'message' => 'Data berhasil dihapus; perencanaan dihapus dan UUID dicabut dari pembangunan.',
-        ]);
+            // === PERUBAHAN: kalau kosong -> DELETE row pembangunan ===
+            if (empty($after)) {
+                // Kalau ada FK lain yang menghalangi delete, transaksi akan fail.
+                // Kalau kamu mau "fallback" biar tidak fail, bilang ya.
+                $b->delete();
+            } else {
+                $b->uuidUsulan = $after;
+                $b->save();
+            }
+        }
+
+        // 4) Hapus metadata upload
+        if ($fileUuids) {
+            PermukimanUpload::whereIn('uuid', $fileUuids)->delete();
+            PermukimanUploadTemp::whereIn('uuid', $fileUuids)->delete();
+        }
+
+        // 5) Hapus row Permukiman
+        $data->delete();
+    });
+
+    // 6) Hapus file fisik (setelah transaksi DB sukses)
+    foreach (array_unique(array_merge($finalPaths, $tempPaths)) as $p) {
+        try {
+            if ($p && Storage::exists($p)) {
+                Storage::delete($p);
+            }
+        } catch (\Throwable $e) {
+            // optional: log jika perlu
+        }
     }
+
+    return response()->json([
+        'success' => true,
+        'message' => 'Data berhasil dihapus. Perencanaan & pengawasan dibersihkan, UUID dicabut dari pembangunan (row kosong dihapus), dan file ikut terhapus.',
+    ]);
+}
+
 
     // ====================== Helpers ======================
 

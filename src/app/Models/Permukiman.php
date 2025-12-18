@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class Permukiman extends Model
 {
@@ -30,7 +31,6 @@ class Permukiman extends Model
         'no_kontak_pic',
         'status_tanah',
 
-        // <-- sekarang array (JSON) juga
         'foto_sertifikat_status_tanah',
 
         'panjang_usulan',
@@ -44,7 +44,6 @@ class Permukiman extends Model
         'pesan_verifikasi',
         'user_id',
 
-        // arrays
         'foto_sta0',
         'foto_sta100',
         'surat_pemohonan',
@@ -56,11 +55,15 @@ class Permukiman extends Model
         'tanggal_usulan'                => 'date',
         'status_verifikasi'             => 'integer',
 
-        // arrays (JSON)
         'foto_sertifikat_status_tanah'  => 'array',
         'foto_sta0'                     => 'array',
         'foto_sta100'                   => 'array',
         'surat_pemohonan'               => 'array',
-        // 'proposal_usulan' dihapus
     ];
+
+    // ✅ Relasi ke tabel users untuk ambil users.name
+    public function user(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'user_id');
+    }
 }

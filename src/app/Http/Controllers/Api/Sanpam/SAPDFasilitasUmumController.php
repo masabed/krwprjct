@@ -12,6 +12,7 @@ use App\Models\Pengawasan;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Illuminate\Support\Facades\DB;
 
 class SAPDFasilitasUmumController extends Controller
 {
@@ -208,98 +209,7 @@ class SAPDFasilitasUmumController extends Controller
     }
 
     // DELETE /api/sanpam/fasum/{uuid}
-    public function destroy(string $uuid)
-    {
-        /** @var \App\Models\UsulanSAPDSFasilitasUmum|null $item */
-        $item = UsulanSAPDSFasilitasUmum::where('uuid', $uuid)->first();
-
-        if (!$item) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Data tidak ditemukan',
-            ], 404);
-        }
-
-        // helper normalisasi: null|string(JSON)|string single|array -> array<string>
-        $toArray = function ($val): array {
-            if (is_null($val)) return [];
-            if (is_array($val)) {
-                return collect($val)->map(fn($v)=>(string)$v)->filter()->values()->all();
-            }
-            $s = trim((string)$val);
-            if ($s === '') return [];
-            if (str_starts_with($s, '[')) {
-                $arr = json_decode($s, true);
-                return is_array($arr)
-                    ? collect($arr)->map(fn($v)=>(string)$v)->filter()->values()->all()
-                    : [$s];
-            }
-            return [$s];
-        };
-
-        // hapus token2 ini (uuid & id sebagai fallback)
-        $usulanUuid = (string) $item->uuid;
-        $usulanId   = (string) $item->getKey();
-        $tokens     = array_values(array_unique(array_filter([$usulanUuid, $usulanId])));
-
-        $result = [
-            'deleted_perencanaan' => 0,
-            'updated_pembangunan' => 0,
-            'updated_rows'        => [],
-        ];
-
-        \DB::transaction(function () use ($item, $tokens, $toArray, &$result) {
-            // 1) Hapus semua Perencanaan yang menunjuk ke usulan ini
-            $result['deleted_perencanaan'] = \App\Models\Perencanaan::query()
-                ->where(function($q) use ($tokens) {
-                    foreach ($tokens as $t) {
-                        $q->orWhere('uuidUsulan', $t);
-                    }
-                })
-                ->delete();
-
-            // 2) Temukan semua Pembangunan yang memuat uuidUsulan ini
-            $pbQuery = \App\Models\Pembangunan::query()
-                ->whereNotNull('uuidUsulan')
-                ->where(function($q) use ($tokens) {
-                    foreach ($tokens as $t) {
-                        $q->orWhereJsonContains('uuidUsulan', $t)
-                          ->orWhere('uuidUsulan', $t)
-                          ->orWhere('uuidUsulan', 'like', '%"'.$t.'"%')
-                          ->orWhere('uuidUsulan', 'like', '%'.$t.'%');
-                    }
-                })
-                ->lockForUpdate();
-
-            $rows = $pbQuery->get();
-
-            foreach ($rows as $b) {
-                $after = collect($toArray($b->uuidUsulan))
-                    ->reject(fn($v) => in_array((string)$v, $tokens, true))
-                    ->values()
-                    ->all();
-
-                $b->uuidUsulan = count($after) ? $after : null;
-                $b->save();
-
-                $result['updated_pembangunan']++;
-                $result['updated_rows'][] = [
-                    'uuidPembangunan'  => (string) $b->id,
-                    'uuidUsulan_after' => $b->uuidUsulan,
-                ];
-            }
-
-            // 3) Hapus usulan utamanya
-            $item->delete();
-        });
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Usulan dihapus. Relasi perencanaan dibersihkan dan UUID di kolom uuidUsulan pada pembangunan sudah dihapus.',
-            'result'  => $result,
-        ]);
-    }
-
+   
     // List (tanpa pagination) — ?mine=1 untuk hanya data milik user login
    public function index(Request $request)
 {
@@ -312,11 +222,12 @@ class SAPDFasilitasUmumController extends Controller
     }
 
     $role   = strtolower((string) ($auth->role ?? ''));
-    // Role yang full akses:
-    // admin, admin_bidang, operator, pengawas
     $isPriv = in_array($role, ['admin', 'admin_bidang', 'operator', 'pengawas'], true);
 
-    $q = UsulanSAPDSFasilitasUmum::query()->latest();
+    // ✅ eager load user (ambil id & name saja)
+    $q = UsulanSAPDSFasilitasUmum::query()
+        ->with(['user:id,name'])
+        ->latest();
 
     if ($isPriv) {
         // Privileged: boleh lihat semua
@@ -325,19 +236,13 @@ class SAPDFasilitasUmumController extends Controller
             $q->where('user_id', (string) $auth->id);
         }
     } else {
-        // User biasa → pakai aturan kecamatan/kelurahan + selalu boleh lihat miliknya sendiri
+        // User biasa → aturan kecamatan/kelurahan + selalu boleh lihat miliknya
         $userKec = strtolower(trim((string) ($auth->kecamatan ?? '')));
         $userKel = strtolower(trim((string) ($auth->kelurahan ?? '')));
 
         if ($userKec === '') {
-            // Tidak punya kecamatan di profil → hanya data miliknya
             $q->where('user_id', (string) $auth->id);
         } else {
-            // Boleh:
-            // - data miliknya
-            // - data di kecamatan yang sama
-            //   - jika kelurahan user kosong → semua kelurahan di kecamatan tsb
-            //   - jika kelurahan user diisi → hanya kelurahan tsb
             $q->where(function ($qq) use ($auth, $userKec, $userKel) {
                 $qq->where('user_id', (string) $auth->id)
                    ->orWhere(function ($sub) use ($userKec, $userKel) {
@@ -355,6 +260,7 @@ class SAPDFasilitasUmumController extends Controller
         return [
             'uuid'                     => $item->uuid,
             'user_id'                  => $item->user_id,
+            'user_name'                => $item->user?->name, // ✅ tambahan
 
             'sumberUsulan'             => $item->sumberUsulan,
             'namaAspirator'            => $item->namaAspirator,
@@ -371,7 +277,6 @@ class SAPDFasilitasUmumController extends Controller
             'titikLokasi'              => $item->titikLokasi,
             'pesan_verifikasi'         => $item->pesan_verifikasi,
 
-            // Array UUID file
             'buktiKepemilikan'         => $item->buktiKepemilikan ?? [],
             'fotoLahan'                => $item->fotoLahan ?? [],
 
@@ -386,8 +291,6 @@ class SAPDFasilitasUmumController extends Controller
         'data'    => $list,
     ]);
 }
-
-
 
     // Detail
    public function show(string $uuid)

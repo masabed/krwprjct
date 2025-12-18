@@ -560,87 +560,157 @@ public function index(Request $request)
      * DELETE /api/psu/usulan-fisik-bsl/{id}
      */
     public function destroy(Request $request, string $id)
-    {
-        $user = $request->user();
-        if (!$user) {
-            return response()->json(['success' => false, 'message' => 'Unauthenticated'], 401);
+{
+    $user = $request->user();
+    if (!$user) {
+        return response()->json(['success' => false, 'message' => 'Unauthenticated'], 401);
+    }
+
+    /** @var \App\Models\UsulanFisikBSL|null $row */
+    $row = UsulanFisikBSL::find($id);
+    if (!$row) {
+        return response()->json(['success' => false, 'message' => 'Data tidak ditemukan'], 404);
+    }
+
+    // === ACCESS CONTROL: admin / operator / owner ===
+    $role    = strtolower((string) ($user->role ?? ''));
+    $isAdmin = ($role === 'admin');
+    $isOper  = ($role === 'operator');
+    $isOwner = (string) ($row->user_id ?? '') === (string) ($user->id ?? '');
+
+    if (!($isAdmin || $isOper || $isOwner)) {
+        return response()->json(['success' => false, 'message' => 'Forbidden'], 403);
+    }
+
+    // 0) Hapus file FINAL terkait (mengikuti helper kamu)
+    foreach (self::FILE_FIELDS as $f) {
+        $uuids = $row->getAttribute($f) ?? [];
+        if ($uuids) {
+            $this->deleteFinalUploads(is_array($uuids) ? $uuids : []);
         }
+    }
 
-        /** @var \App\Models\UsulanFisikBSL|null $row */
-        $row = UsulanFisikBSL::find($id);
-        if (!$row) {
-            return response()->json(['success' => false, 'message' => 'Data tidak ditemukan'], 404);
+    // token relasi untuk uuidUsulan (id + uuid kalau ada)
+    $usulanId   = (string) $row->getKey();          // biasanya id
+    $usulanUuid = '';
+    try {
+        $usulanUuid = (string) ($row->uuid ?? '');
+    } catch (\Throwable $e) {
+        $usulanUuid = '';
+    }
+
+    $tokens    = array_values(array_unique(array_filter([$usulanId, $usulanUuid])));
+    $tokensLow = array_map('strtolower', $tokens);
+
+    // helper normalisasi: null|string(JSON)|string single|array -> array<string>
+    $toArray = function ($val): array {
+        if (is_null($val)) return [];
+        if (is_array($val)) {
+            return collect($val)
+                ->map(fn($v) => trim((string)$v))
+                ->filter()
+                ->values()
+                ->all();
         }
-
-        if ((string) $row->user_id !== (string) $user->id && ($user->role ?? null) !== 'admin') {
-            return response()->json(['success' => false, 'message' => 'Forbidden'], 403);
-        }
-
-        // 0) Hapus file FINAL terkait
-        foreach (self::FILE_FIELDS as $f) {
-            $uuids = $row->getAttribute($f) ?? [];
-            if ($uuids) {
-                $this->deleteFinalUploads(is_array($uuids) ? $uuids : []);
-            }
-        }
-
-        // Kunci referensi usulan (pakai PK baris yang ditemukan)
-        $usulanKey   = (string) $row->id;
-        $needleLower = strtolower($usulanKey);
-
-        DB::transaction(function () use ($row, $usulanKey, $needleLower) {
-            // 1) Hapus semua Perencanaan yang menempel ke usulan ini
-            Perencanaan::where('uuidUsulan', $usulanKey)->delete();
-
-            // 2) Cabut UUID usulan ini dari semua baris Pembangunan terkait
-            $buildRows = Pembangunan::query()
-                ->where(function ($q) use ($usulanKey) {
-                    $q->where('uuidUsulan', $usulanKey)               // legacy string
-                      ->orWhereJsonContains('uuidUsulan', $usulanKey); // JSON array
-                })
-                ->get();
-
-            foreach ($buildRows as $b) {
-                $raw = $b->getAttribute('uuidUsulan');
-
-                // Normalisasi ke array
-                if (is_array($raw)) {
-                    $arr = $raw;
-                } elseif (is_string($raw)) {
-                    $t = trim($raw);
-                    if ($t !== '' && str_starts_with($t, '[')) {
-                        $dec = json_decode($t, true);
-                        $arr = is_array($dec) ? $dec : [];
-                    } elseif ($t !== '') {
-                        $arr = [$t]; // legacy single value
-                    } else {
-                        $arr = [];
-                    }
-                } else {
-                    $arr = [];
-                }
-
-                // Filter keluar id target (case-insensitive)
-                $after = collect($arr)
-                    ->map(fn($v) => trim((string) $v))
-                    ->filter(fn($v) => $v !== '' && strtolower($v) !== $needleLower)
+        $s = trim((string)$val);
+        if ($s === '') return [];
+        if (str_starts_with($s, '[')) {
+            $arr = json_decode($s, true);
+            if (is_array($arr)) {
+                return collect($arr)
+                    ->map(fn($v) => trim((string)$v))
+                    ->filter()
                     ->values()
                     ->all();
+            }
+            return [$s];
+        }
+        return [$s];
+    };
 
-                // Simpan balik (kosong → null agar rapi)
-                $b->uuidUsulan = $after ? $after : null;
-                $b->save();
+    $result = [
+        'deleted_perencanaan'      => 0,
+        'deleted_pengawasan'       => 0,
+        'updated_pembangunan_rows' => 0,
+        'deleted_pembangunan_rows' => 0,
+        'deleted_pembangunan_ids'  => [],
+    ];
+
+    DB::transaction(function () use ($row, $tokens, $tokensLow, $toArray, &$result) {
+
+        // 1) Hapus Perencanaan terkait (support token id/uuid)
+        $result['deleted_perencanaan'] = \App\Models\Perencanaan::query()
+            ->where(function ($q) use ($tokens) {
+                foreach ($tokens as $t) $q->orWhere('uuidUsulan', $t);
+            })
+            ->delete();
+
+        // 2) Hapus Pengawasan terkait (support token id/uuid)
+        try {
+            $result['deleted_pengawasan'] = \App\Models\Pengawasan::query()
+                ->where(function ($q) use ($tokens) {
+                    foreach ($tokens as $t) $q->orWhere('uuidUsulan', $t);
+                })
+                ->delete();
+        } catch (\Throwable $e) {
+            $result['deleted_pengawasan'] = 0;
+        }
+
+        // 3) Cabut token dari semua row Pembangunan yang memuat usulan ini
+        $rows = \App\Models\Pembangunan::query()
+            ->whereNotNull('uuidUsulan')
+            ->where(function ($q) use ($tokens) {
+                foreach ($tokens as $t) {
+                    $q->orWhereJsonContains('uuidUsulan', $t)
+                      ->orWhere('uuidUsulan', $t)
+                      ->orWhere('uuidUsulan', 'like', '%"'.$t.'"%')
+                      ->orWhere('uuidUsulan', 'like', '%'.$t.'%');
+                }
+            })
+            ->lockForUpdate()
+            ->get();
+
+        foreach ($rows as $b) {
+            $after = collect($toArray($b->uuidUsulan))
+                ->map(fn($v) => trim((string)$v))
+                ->filter(fn($v) => $v !== '')
+                ->reject(fn($v) => in_array(strtolower((string)$v), $tokensLow, true))
+                ->values()
+                ->unique()
+                ->all();
+
+            // kosong -> hapus row pembangunan (kalau gagal, fallback set [])
+            if (empty($after)) {
+                try {
+                    $id = (string) $b->id;
+                    $b->delete();
+
+                    $result['deleted_pembangunan_rows']++;
+                    $result['deleted_pembangunan_ids'][] = $id;
+                } catch (\Throwable $e) {
+                    $b->uuidUsulan = [];
+                    $b->save();
+
+                    $result['updated_pembangunan_rows']++;
+                }
+                continue;
             }
 
-            // 3) Hapus usulan BSL utamanya
-            $row->delete();
-        });
+            $b->uuidUsulan = $after;
+            $b->save();
+            $result['updated_pembangunan_rows']++;
+        }
 
-        return response()->json([
-            'success' => true,
-            'message' => 'Data berhasil dihapus; perencanaan dihapus dan UUID dicabut dari pembangunan.',
-        ]);
-    }
+        // 4) Hapus usulan utamanya
+        $row->delete();
+    });
+
+    return response()->json([
+        'success' => true,
+        'message' => 'Data berhasil dihapus; perencanaan & pengawasan dibersihkan, UUID dicabut dari pembangunan, dan pembangunan kosong ikut terhapus.',
+        'result'  => $result,
+    ]);
+}
 
     // ================== HELPERS ==================
 

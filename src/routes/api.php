@@ -2,6 +2,7 @@
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\Api\UsulanNotificationController;
 use App\Http\Controllers\Api\DashboardController;
 use App\Http\Controllers\Api\LoginController;
 use App\Http\Controllers\Api\ViewUserController;
@@ -46,15 +47,18 @@ Route::middleware('auth:api')->group(function () {
     Route::delete('/users/{id}', [UserManagementController::class, 'destroy']);    // Delete user (admin only, sesuai controller)
 });
 
+//Notifikasi
+
+ Route::get('/notifications', [UsulanNotificationController::class, 'all']);
+    Route::post('/notifications/markAsRead', [UsulanNotificationController::class, 'markAllAsRead']);
+
+    
 // View User + MyData
 Route::middleware('auth:api')->group(function () {
     Route::get('/users', [ViewUserController::class, 'index']);
     Route::get('/users/pengawas', [ViewUserController::class, 'indexPengawas']); // View all user (admin only di controller)
     Route::get('/profile', [ViewUserController::class, 'profile']);              // Profil user login
     Route::get('/users/{id}', [ViewUserController::class, 'show']);              // View user by id
-
-    // Get Data Pribadi
-    Route::get('/myData', [MySubmissionsController::class, 'index']);
 });
 
 // Semua route lain (per modul)

@@ -9,7 +9,10 @@ use App\Models\RutilahuUploadTemp;
 use App\Models\Perencanaan;
 use App\Models\Pengawasan;
 use App\Models\Pembangunan;
+use App\Models\User;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
@@ -68,7 +71,7 @@ class RutilahuController extends Controller
             $this->normalizeUuidArrayField($request, $f);
         }
 
-        // Normalisasi nilai kosong → null untuk field nullable (kondisi/akses)
+        // Normalisasi nilai kosong → null untuk field nullable
         $this->nullifyEmpty($request, [
             'kondisiPondasi', 'kondisiSloof', 'kondisiKolom', 'kondisiRingBalok',
             'kondisiRangkaAtap', 'kondisiDinding', 'kondisiLantai', 'kondisiPenutupAtap',
@@ -76,66 +79,57 @@ class RutilahuController extends Controller
         ]);
 
         $request->validate([
-            // Dari FormData
-            'sumberUsulan'          => 'required|string|max:255',
-            'namaAspirator'         => 'required|string|max:255',
-            'noKontakAspirator'     => 'required|string|max:50',
+            'sumberUsulan'           => 'required|string|max:255',
+            'namaAspirator'          => 'required|string|max:255',
+            'noKontakAspirator'      => 'required|string|max:50',
+            'kecamatan'              => 'required|string|max:150',
+            'kelurahan'              => 'required|string|max:150',
+            'titikLokasi'            => 'required|string|max:255',
+            'nama_CPCL'              => 'required|string|max:255',
+            'nomorNIK'               => 'required|string|max:30',
+            'nomorKK'                => 'required|string|max:30',
+            'jumlahKeluarga'         => 'required|string|max:10',
+            'alamatDusun'            => 'required|string|max:255',
+            'alamatRT'               => 'required|string|max:10',
+            'alamatRW'               => 'required|string|max:10',
+            'umur'                   => 'required|string|max:10',
+            'luasTanah'              => 'required|string|max:100',
+            'luasBangunan'           => 'required|string|max:100',
+            'pendidikanTerakhir'     => 'required|string|max:100',
+            'pekerjaan'              => 'required|string|max:100',
+            'besaranPenghasilan'     => 'required|string|max:250',
+            'statusKepemilikanRumah' => 'required|string|max:250',
+            'asetRumahLain'          => 'required|string|max:100',
+            'asetTanahLain'          => 'required|string|max:100',
+            'sumberPenerangan'       => 'required|string|max:100',
+            'bantuanPerumahan'       => 'required|string|max:100',
+            'jenisKawasan'           => 'required|string|max:100',
+            'jenisProgram'           => 'required|string|max:100',
+            'jenisKelamin'           => 'required|string|max:20',
 
-            'kecamatan'             => 'required|string|max:150',
-            'kelurahan'             => 'required|string|max:150',
-            'titikLokasi'           => 'required|string|max:255',
+            'kondisiPondasi'      => 'nullable|string|max:255',
+            'kondisiSloof'        => 'nullable|string|max:255',
+            'kondisiKolom'        => 'nullable|string|max:255',
+            'kondisiRingBalok'    => 'nullable|string|max:255',
+            'kondisiRangkaAtap'   => 'nullable|string|max:255',
+            'kondisiDinding'      => 'nullable|string|max:255',
+            'kondisiLantai'       => 'nullable|string|max:255',
+            'kondisiPenutupAtap'  => 'nullable|string|max:255',
+            'aksesAirMinum'       => 'nullable|string|max:100',
+            'aksesAirSanitasi'    => 'nullable|string|max:100',
 
-            'nama_CPCL'             => 'required|string|max:255',
-            'nomorNIK'              => 'required|string|max:30',
-            'nomorKK'               => 'required|string|max:30',
-            'jumlahKeluarga'        => 'required|string|max:10',
+            'fotoKTP'             => 'required|array|min:1|max:5',
+            'fotoKTP.*'           => 'uuid',
+            'fotoSuratTanah'      => 'required|array|min:1|max:5',
+            'fotoSuratTanah.*'    => 'uuid',
+            'fotoRumah'           => 'required|array|min:1|max:5',
+            'fotoRumah.*'         => 'uuid',
+            'fotoKK'              => 'required|array|min:1|max:5',
+            'fotoKK.*'            => 'uuid',
+            'dokumentasiSurvey'   => 'nullable|array|max:5',
+            'dokumentasiSurvey.*' => 'uuid',
 
-            'alamatDusun'           => 'required|string|max:255',
-            'alamatRT'              => 'required|string|max:10',
-            'alamatRW'              => 'required|string|max:10',
-
-            'umur'                  => 'required|string|max:10',
-            'luasTanah'             => 'required|string|max:100',
-            'luasBangunan'          => 'required|string|max:100',
-            'pendidikanTerakhir'    => 'required|string|max:100',
-            'pekerjaan'             => 'required|string|max:100',
-            'besaranPenghasilan'    => 'required|string|max:250',
-            'statusKepemilikanRumah'=> 'required|string|max:250',
-            'asetRumahLain'         => 'required|string|max:100',
-            'asetTanahLain'         => 'required|string|max:100',
-
-            'sumberPenerangan'      => 'required|string|max:100',
-            'bantuanPerumahan'      => 'required|string|max:100',
-            'jenisKawasan'          => 'required|string|max:100',
-            'jenisProgram'          => 'required|string|max:100',
-            'jenisKelamin'          => 'required|string|max:20',
-
-            // Opsional kondisi/akses
-            'kondisiPondasi'        => 'nullable|string|max:255',
-            'kondisiSloof'          => 'nullable|string|max:255',
-            'kondisiKolom'          => 'nullable|string|max:255',
-            'kondisiRingBalok'      => 'nullable|string|max:255',
-            'kondisiRangkaAtap'     => 'nullable|string|max:255',
-            'kondisiDinding'        => 'nullable|string|max:255',
-            'kondisiLantai'         => 'nullable|string|max:255',
-            'kondisiPenutupAtap'    => 'nullable|string|max:255',
-            'aksesAirMinum'         => 'nullable|string|max:100',
-            'aksesAirSanitasi'      => 'nullable|string|max:100',
-
-            // FILE ARRAYS (UUID)
-            'fotoKTP'               => 'required|array|min:1|max:5',
-            'fotoKTP.*'             => 'uuid',
-            'fotoSuratTanah'        => 'required|array|min:1|max:5',
-            'fotoSuratTanah.*'      => 'uuid',
-            'fotoRumah'             => 'required|array|min:1|max:5',
-            'fotoRumah.*'           => 'uuid',
-            'fotoKK'                => 'required|array|min:1|max:5',
-            'fotoKK.*'              => 'uuid',
-
-            'dokumentasiSurvey'     => 'nullable|array|max:5',
-            'dokumentasiSurvey.*'   => 'uuid',
-
-            'pesan_verifikasi'      => 'nullable|string|max:512',
+            'pesan_verifikasi'    => 'nullable|string|max:512',
         ]);
 
         $uuid = (string) Str::uuid();
@@ -146,7 +140,6 @@ class RutilahuController extends Controller
             'sumberUsulan'           => $request->sumberUsulan,
             'namaAspirator'          => $request->namaAspirator,
             'noKontakAspirator'      => $request->noKontakAspirator,
-
             'kecamatan'              => $request->kecamatan,
             'kelurahan'              => $request->kelurahan,
             'titikLokasi'            => $request->titikLokasi,
@@ -155,7 +148,6 @@ class RutilahuController extends Controller
             'nomorNIK'               => $request->nomorNIK,
             'nomorKK'                => $request->nomorKK,
             'jumlahKeluarga'         => $request->jumlahKeluarga,
-
             'alamatDusun'            => $request->alamatDusun,
             'alamatRT'               => $request->alamatRT,
             'alamatRW'               => $request->alamatRW,
@@ -175,14 +167,12 @@ class RutilahuController extends Controller
             'jenisProgram'           => $request->jenisProgram,
             'jenisKelamin'           => $request->jenisKelamin,
 
-            // Arrays (JSON via casts)
             'fotoKTP'                => $request->fotoKTP,
             'fotoKK'                 => $request->fotoKK,
             'fotoSuratTanah'         => $request->fotoSuratTanah,
             'fotoRumah'              => $request->fotoRumah,
             'dokumentasiSurvey'      => $request->dokumentasiSurvey ?? [],
 
-            // Opsional
             'kondisiPondasi'         => $request->kondisiPondasi,
             'kondisiSloof'           => $request->kondisiSloof,
             'kondisiKolom'           => $request->kondisiKolom,
@@ -199,7 +189,6 @@ class RutilahuController extends Controller
             'user_id'                  => $user->id,
         ]);
 
-        // Pindahkan file dari TEMP → FINAL
         $allUuids = array_unique(array_merge(
             $request->fotoKTP,
             $request->fotoSuratTanah,
@@ -207,6 +196,7 @@ class RutilahuController extends Controller
             $request->fotoKK,
             $request->dokumentasiSurvey ?? []
         ));
+
         $this->moveTempsToFinal($allUuids, (string) $user->id);
 
         return response()->json([
@@ -218,522 +208,217 @@ class RutilahuController extends Controller
 
     /** POST /rutilahu/update/{uuid} */
     public function update(Request $request, string $uuid)
-{
-    // === ACCESS CONTROL: hanya admin & operator ===
-    $auth = auth()->user();
-    if (!$auth) {
-        return response()->json([
-            'success' => false,
-            'message' => 'Unauthenticated',
-        ], 401);
-    }
+    {
+        $auth = auth()->user();
+        if (!$auth) {
+            return response()->json(['success' => false, 'message' => 'Unauthenticated'], 401);
+        }
 
-    $role   = strtolower((string) ($auth->role ?? ''));
-    $isPriv = in_array($role, ['admin', 'operator'], true);
+        $item = Rutilahu::where('uuid', $uuid)->first();
+        if (!$item) {
+            return response()->json(['success' => false, 'message' => 'Data tidak ditemukan'], 404);
+        }
 
-    if (!$isPriv) {
-        return response()->json([
-            'success' => false,
-            'message' => 'Unauthorized. Hanya admin dan operator yang bisa mengedit data.',
-        ], 403);
-    }
+        $role    = strtolower((string) ($auth->role ?? ''));
+        $isAdmin = ($role === 'admin');
+        $isOper  = ($role === 'operator');
+        $isOwner = (string) ($item->user_id ?? '') === (string) ($auth->id ?? '');
 
-    // === Ambil data utama ===
-    $item = Rutilahu::where('uuid', $uuid)->first();
-    if (!$item) {
-        return response()->json([
-            'success' => false,
-            'message' => 'Data tidak ditemukan',
-        ], 404);
-    }
+        if (!($isAdmin || $isOper || $isOwner)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized. Hanya admin, operator, atau pemilik data yang bisa mengedit.',
+            ], 403);
+        }
 
-    $this->applyAliases($request);
+        $this->applyAliases($request);
 
-    $fileFields = ['fotoKTP', 'fotoSuratTanah', 'fotoRumah', 'fotoKK', 'dokumentasiSurvey'];
-    foreach ($fileFields as $f) {
-        $this->normalizeUuidArrayField($request, $f);
-    }
+        $fileFields = ['fotoKTP', 'fotoSuratTanah', 'fotoRumah', 'fotoKK', 'dokumentasiSurvey'];
+        foreach ($fileFields as $f) {
+            $this->normalizeUuidArrayField($request, $f);
+        }
 
-    $this->nullifyEmpty($request, [
-        'kondisiPondasi', 'kondisiSloof', 'kondisiKolom', 'kondisiRingBalok',
-        'kondisiRangkaAtap', 'kondisiDinding', 'kondisiLantai', 'kondisiPenutupAtap',
-        'aksesAirMinum', 'aksesAirSanitasi', 'pesan_verifikasi'
-    ]);
+        $this->nullifyEmpty($request, [
+            'kondisiPondasi', 'kondisiSloof', 'kondisiKolom', 'kondisiRingBalok',
+            'kondisiRangkaAtap', 'kondisiDinding', 'kondisiLantai', 'kondisiPenutupAtap',
+            'aksesAirMinum', 'aksesAirSanitasi', 'pesan_verifikasi'
+        ]);
 
-    $validated = $request->validate([
-        'sumberUsulan'          => 'sometimes|string|max:255',
-        'namaAspirator'         => 'sometimes|string|max:255',
-        'noKontakAspirator'     => 'sometimes|string|max:50',
+        $validated = $request->validate([
+            'sumberUsulan'           => 'sometimes|string|max:255',
+            'namaAspirator'          => 'sometimes|string|max:255',
+            'noKontakAspirator'      => 'sometimes|string|max:50',
+            'kecamatan'              => 'sometimes|string|max:150',
+            'kelurahan'              => 'sometimes|string|max:150',
+            'titikLokasi'            => 'sometimes|string|max:255',
+            'nama_CPCL'              => 'sometimes|string|max:255',
+            'nomorNIK'               => 'sometimes|string|max:30',
+            'nomorKK'                => 'sometimes|string|max:30',
+            'jumlahKeluarga'         => 'sometimes|string|max:10',
+            'alamatDusun'            => 'sometimes|string|max:255',
+            'alamatRT'               => 'sometimes|string|max:10',
+            'alamatRW'               => 'sometimes|string|max:10',
+            'umur'                   => 'sometimes|string|max:10',
+            'luasTanah'              => 'sometimes|string|max:100',
+            'luasBangunan'           => 'sometimes|string|max:100',
+            'pendidikanTerakhir'     => 'sometimes|string|max:100',
+            'pekerjaan'              => 'sometimes|string|max:100',
+            'besaranPenghasilan'     => 'sometimes|string|max:250',
+            'statusKepemilikanRumah' => 'sometimes|string|max:250',
+            'asetRumahLain'          => 'sometimes|string|max:100',
+            'asetTanahLain'          => 'sometimes|string|max:100',
+            'sumberPenerangan'       => 'sometimes|string|max:100',
+            'bantuanPerumahan'       => 'sometimes|string|max:100',
+            'jenisKawasan'           => 'sometimes|string|max:100',
+            'jenisProgram'           => 'sometimes|string|max:100',
+            'jenisKelamin'           => 'sometimes|string|max:20',
 
-        'kecamatan'             => 'sometimes|string|max:150',
-        'kelurahan'             => 'sometimes|string|max:150',
-        'titikLokasi'           => 'sometimes|string|max:255',
+            'kondisiPondasi'      => 'sometimes|nullable|string|max:255',
+            'kondisiSloof'        => 'sometimes|nullable|string|max:255',
+            'kondisiKolom'        => 'sometimes|nullable|string|max:255',
+            'kondisiRingBalok'    => 'sometimes|nullable|string|max:255',
+            'kondisiRangkaAtap'   => 'sometimes|nullable|string|max:255',
+            'kondisiDinding'      => 'sometimes|nullable|string|max:255',
+            'kondisiLantai'       => 'sometimes|nullable|string|max:255',
+            'kondisiPenutupAtap'  => 'sometimes|nullable|string|max:255',
+            'aksesAirMinum'       => 'sometimes|nullable|string|max:100',
+            'aksesAirSanitasi'    => 'sometimes|nullable|string|max:100',
 
-        'nama_CPCL'             => 'sometimes|string|max:255',
-        'nomorNIK'              => 'sometimes|string|max:30',
-        'nomorKK'               => 'sometimes|string|max:30',
-        'jumlahKeluarga'        => 'sometimes|string|max:10',
-        'alamatDusun'           => 'sometimes|string|max:255',
-        'alamatRT'              => 'sometimes|string|max:10',
-        'alamatRW'              => 'sometimes|string|max:10',
-        'umur'                  => 'sometimes|string|max:10',
-        'luasTanah'             => 'sometimes|string|max:100',
-        'luasBangunan'          => 'sometimes|string|max:100',
-        'pendidikanTerakhir'    => 'sometimes|string|max:100',
-        'pekerjaan'             => 'sometimes|string|max:100',
-        'besaranPenghasilan'    => 'sometimes|string|max:250',
-        'statusKepemilikanRumah'=> 'sometimes|string|max:250',
-        'asetRumahLain'         => 'sometimes|string|max:100',
-        'asetTanahLain'         => 'sometimes|string|max:100',
-        'sumberPenerangan'      => 'sometimes|string|max:100',
-        'bantuanPerumahan'      => 'sometimes|string|max:100',
-        'jenisKawasan'          => 'sometimes|string|max:100',
-        'jenisProgram'          => 'sometimes|string|max:100',
-        'jenisKelamin'          => 'sometimes|string|max:20',
+            'fotoKTP'             => 'sometimes|nullable|array|min:1|max:5',
+            'fotoKTP.*'           => 'uuid',
+            'fotoSuratTanah'      => 'sometimes|nullable|array|min:1|max:5',
+            'fotoSuratTanah.*'    => 'uuid',
+            'fotoRumah'           => 'sometimes|nullable|array|min:1|max:5',
+            'fotoRumah.*'         => 'uuid',
+            'fotoKK'              => 'sometimes|nullable|array|min:1|max:5',
+            'fotoKK.*'            => 'uuid',
+            'dokumentasiSurvey'   => 'sometimes|nullable|array|max:5',
+            'dokumentasiSurvey.*' => 'uuid',
 
-        'kondisiPondasi'        => 'sometimes|nullable|string|max:255',
-        'kondisiSloof'          => 'sometimes|nullable|string|max:255',
-        'kondisiKolom'          => 'sometimes|nullable|string|max:255',
-        'kondisiRingBalok'      => 'sometimes|nullable|string|max:255',
-        'kondisiRangkaAtap'     => 'sometimes|nullable|string|max:255',
-        'kondisiDinding'        => 'sometimes|nullable|string|max:255',
-        'kondisiLantai'         => 'sometimes|nullable|string|max:255',
-        'kondisiPenutupAtap'    => 'sometimes|nullable|string|max:255',
-        'aksesAirMinum'         => 'sometimes|nullable|string|max:100',
-        'aksesAirSanitasi'      => 'sometimes|nullable|string|max:100',
+            'dokumentasiSurvey_text'   => 'sometimes|nullable|string|max:1000',
+            'status_verifikasi_usulan' => 'sometimes|integer|in:0,1,2,3,4,5,6,7,8',
+            'pesan_verifikasi'         => 'sometimes|nullable|string|max:512',
+        ]);
 
-        // FILE arrays (nullable → kalau null, abaikan)
-        'fotoKTP'               => 'sometimes|nullable|array|min:1|max:5',
-        'fotoKTP.*'             => 'uuid',
-        'fotoSuratTanah'        => 'sometimes|nullable|array|min:1|max:5',
-        'fotoSuratTanah.*'      => 'uuid',
-        'fotoRumah'             => 'sometimes|nullable|array|min:1|max:5',
-        'fotoRumah.*'           => 'uuid',
-        'fotoKK'                => 'sometimes|nullable|array|min:1|max:5',
-        'fotoKK.*'              => 'uuid',
-        'dokumentasiSurvey'     => 'sometimes|nullable|array|max:5',
-        'dokumentasiSurvey.*'   => 'uuid',
+        if (array_key_exists('status_verifikasi_usulan', $validated)
+            && (int) $validated['status_verifikasi_usulan'] >= 4) {
+            $validated['pesan_verifikasi'] = null;
+        }
 
-        'dokumentasiSurvey_text'   => 'sometimes|nullable|string|max:1000',
-        'status_verifikasi_usulan' => 'sometimes|integer|in:0,1,2,3,4,5,6,7,8',
-        'pesan_verifikasi'         => 'sometimes|nullable|string|max:512',
-    ]);
+        $uuidsToMove  = [];
+        $removedUuids = [];
 
-    // Auto-clear pesan saat status >= 4
-    if (array_key_exists('status_verifikasi_usulan', $validated)
-        && (int) $validated['status_verifikasi_usulan'] >= 4) {
-        $validated['pesan_verifikasi'] = null;
-    }
+        foreach ($fileFields as $f) {
+            if ($request->has($f)) {
+                $incoming = $request->input($f);
+                $existing = $item->getAttribute($f) ?? [];
 
-    // Hitung UUID baru & yang dihapus (hanya untuk kolom file yang DIKIRIM)
-    $uuidsToMove  = [];
-    $removedUuids = [];
+                if (is_array($incoming)) {
+                    $diffNew = array_diff($incoming, is_array($existing) ? $existing : []);
+                    if ($diffNew) {
+                        $uuidsToMove = array_merge($uuidsToMove, $diffNew);
+                    }
 
-    foreach ($fileFields as $f) {
-        if ($request->has($f)) {
-            $incoming = $request->input($f);           // boleh null/array
-            $existing = $item->getAttribute($f) ?? []; // array
-
-            if (is_array($incoming)) {
-                $diffNew = array_diff($incoming, is_array($existing) ? $existing : []);
-                if ($diffNew) {
-                    $uuidsToMove = array_merge($uuidsToMove, $diffNew);
-                }
-
-                $diffRemoved = array_diff(is_array($existing) ? $existing : [], $incoming);
-                if ($diffRemoved) {
-                    $removedUuids = array_merge($removedUuids, $diffRemoved);
+                    $diffRemoved = array_diff(is_array($existing) ? $existing : [], $incoming);
+                    if ($diffRemoved) {
+                        $removedUuids = array_merge($removedUuids, $diffRemoved);
+                    }
                 }
             }
         }
-    }
 
-    if ($uuidsToMove) {
-        $this->moveTempsToFinal(array_values(array_unique($uuidsToMove)), (string) $item->user_id);
-    }
-
-    // Jika kolom file dikirim null → jangan overwrite
-    $updateData = $validated;
-    foreach ($fileFields as $f) {
-        if (array_key_exists($f, $updateData) && is_null($updateData[$f])) {
-            unset($updateData[$f]);
+        if ($uuidsToMove) {
+            $this->moveTempsToFinal(array_values(array_unique($uuidsToMove)), (string) $item->user_id);
         }
-    }
 
-    // Catat field berubah
-    $changedFields = [];
-    foreach ($updateData as $k => $v) {
-        if ($item->getAttribute($k) !== $v) {
-            $changedFields[] = $k;
+        $updateData = $validated;
+        foreach ($fileFields as $f) {
+            if (array_key_exists($f, $updateData) && is_null($updateData[$f])) {
+                unset($updateData[$f]); // null berarti "tidak update field file itu"
+            }
         }
+
+        $changedFields = [];
+        foreach ($updateData as $k => $v) {
+            if ($item->getAttribute($k) !== $v) {
+                $changedFields[] = $k;
+            }
+        }
+
+        if ($updateData) {
+            $item->update($updateData);
+        }
+
+        if ($removedUuids) {
+            $this->deleteFinalFiles(array_values(array_unique($removedUuids)));
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => empty($changedFields)
+                ? 'Tidak ada perubahan data'
+                : 'Field Berikut Berhasil di Perbaharui: ' . implode(', ', $changedFields),
+            'uuid' => $item->uuid,
+        ]);
     }
-
-    if ($updateData) {
-        $item->update($updateData);
-    }
-
-    // Hapus file FINAL yang lama — hanya untuk kolom yang diupdate
-    if ($removedUuids) {
-        $this->deleteFinalFiles(array_values(array_unique($removedUuids)));
-    }
-
-    return response()->json([
-        'success' => true,
-        'message' => empty($changedFields)
-            ? 'Tidak ada perubahan data'
-            : 'Field Berikut Berhasil di Perbaharui: ' . implode(', ', $changedFields),
-        'uuid'    => $item->uuid,
-    ]);
-}
-
 
     /** GET /rutilahu */
- public function index()
-{
-    $user = auth()->user();
-    if (!$user) {
-        return response()->json([
-            'success' => false,
-            'message' => 'Unauthenticated',
-        ], 401);
-    }
-
-    $role   = strtolower((string) ($user->role ?? ''));
-    // Yang boleh lihat SEMUA data:
-    // admin, admin_bidang, operator, pengawas
-    $isPriv = in_array($role, ['admin', 'admin_bidang', 'operator', 'pengawas'], true);
-
-    $q = Rutilahu::query()->latest();
-
-    if (!$isPriv) {
-        // --- User biasa: filter berdasarkan user_id + kecamatan/kelurahan di profil user ---
-        $userKec = strtolower(trim((string) ($user->kecamatan ?? '')));
-        $userKel = strtolower(trim((string) ($user->kelurahan ?? '')));
-
-        if ($userKec === '') {
-            // Tidak punya kecamatan di profil → fallback: hanya data miliknya
-            $q->where('user_id', (string) $user->id);
-        } else {
-            // Boleh lihat:
-            // - data miliknya
-            // - PLUS data dengan kecamatan sama
-            //   - kalau user kelurahan NULL/'' → semua kelurahan di kecamatan tsb
-            //   - kalau user kelurahan diisi → hanya kelurahan tsb
-            $q->where(function ($qq) use ($user, $userKec, $userKel) {
-                $qq->where('user_id', (string) $user->id)
-                   ->orWhere(function ($sub) use ($userKec, $userKel) {
-                       $sub->whereRaw('LOWER(kecamatan) = ?', [$userKec]);
-
-                       if ($userKel !== '') {
-                           $sub->whereRaw('LOWER(COALESCE(kelurahan, "")) = ?', [$userKel]);
-                       }
-                   });
-            });
+    public function index()
+    {
+        $user = auth()->user();
+        if (!$user) {
+            return response()->json(['success' => false, 'message' => 'Unauthenticated'], 401);
         }
-    }
 
-    $list = $q->get()->map(function ($item) {
-        return [
-            'uuid'                   => $item->uuid,
+        $role   = strtolower((string) ($user->role ?? ''));
+        $isPriv = in_array($role, ['admin', 'admin_bidang', 'operator', 'pengawas'], true);
 
-            'sumberUsulan'           => $item->sumberUsulan,
-            'namaAspirator'          => $item->namaAspirator,
-            'noKontakAspirator'      => $item->noKontakAspirator,
+        $q = Rutilahu::query()
+            ->with(['user:id,name'])
+            ->latest();
 
-            'kecamatan'              => $item->kecamatan,
-            'kelurahan'              => $item->kelurahan,
-            'titikLokasi'            => $item->titikLokasi,
+        if (!$isPriv) {
+            $userKec = strtolower(trim((string) ($user->kecamatan ?? '')));
+            $userKel = strtolower(trim((string) ($user->kelurahan ?? '')));
 
-            'nama_CPCL'              => $item->nama_CPCL,
-            'nomorNIK'               => $item->nomorNIK,
-            'nomorKK'                => $item->nomorKK,
-            'jumlahKeluarga'         => $item->jumlahKeluarga,
-
-            'alamatDusun'            => $item->alamatDusun,
-            'alamatRT'               => $item->alamatRT,
-            'alamatRW'               => $item->alamatRW,
-
-            'umur'                   => $item->umur,
-            'luasTanah'              => $item->luasTanah,
-            'luasBangunan'           => $item->luasBangunan,
-            'pendidikanTerakhir'     => $item->pendidikanTerakhir,
-            'pekerjaan'              => $item->pekerjaan,
-            'besaranPenghasilan'     => $item->besaranPenghasilan,
-            'statusKepemilikanRumah' => $item->statusKepemilikanRumah,
-            'asetRumahLain'          => $item->asetRumahLain,
-            'asetTanahLain'          => $item->asetTanahLain,
-            'sumberPenerangan'       => $item->sumberPenerangan,
-            'bantuanPerumahan'       => $item->bantuanPerumahan,
-            'jenisKawasan'           => $item->jenisKawasan,
-            'jenisProgram'           => $item->jenisProgram,
-            'jenisKelamin'           => $item->jenisKelamin,
-
-            'kondisiPondasi'         => $item->kondisiPondasi,
-            'kondisiSloof'           => $item->kondisiSloof,
-            'kondisiKolom'           => $item->kondisiKolom,
-            'kondisiRingBalok'       => $item->kondisiRingBalok,
-            'kondisiRangkaAtap'      => $item->kondisiRangkaAtap,
-            'kondisiDinding'         => $item->kondisiDinding,
-            'kondisiLantai'          => $item->kondisiLantai,
-            'kondisiPenutupAtap'     => $item->kondisiPenutupAtap,
-            'aksesAirMinum'          => $item->aksesAirMinum,
-            'aksesAirSanitasi'       => $item->aksesAirSanitasi,
-
-            'fotoKTP'                => $item->fotoKTP ?? [],
-            'fotoSuratTanah'         => $item->fotoSuratTanah ?? [],
-            'fotoRumah'              => $item->fotoRumah ?? [],
-            'fotoKK'                 => $item->fotoKK ?? [],
-            'dokumentasiSurvey'      => $item->dokumentasiSurvey ?? [],
-
-            'pesan_verifikasi'         => $item->pesan_verifikasi,
-            'status_verifikasi_usulan' => $item->status_verifikasi_usulan,
-            'created_at'               => $item->created_at,
-            'updated_at'               => $item->updated_at,
-        ];
-    });
-
-    return response()->json([
-        'success' => true,
-        'data'    => $list,
-    ]);
-}
-
- public function show(string $uuid)
-{
-    $auth = auth()->user();
-    if (!$auth) {
-        return response()->json(['success' => false, 'message' => 'Unauthenticated'], 401);
-    }
-
-    $item = Rutilahu::where('uuid', $uuid)->first();
-    if (!$item) {
-        return response()->json([
-            'success' => false,
-            'message' => 'Data tidak ditemukan'
-        ], 404);
-    }
-
-    $role    = strtolower((string) ($auth->role ?? ''));
-    $isOwner = (string) ($item->user_id ?? '') === (string) $auth->id;
-    $isPriv  = in_array($role, ['admin', 'admin_bidang', 'operator', 'pengawas'], true);
-
-    // --- Akses kontrol berbasis kecamatan/kelurahan untuk user biasa ---
-    if (!$isPriv) {
-        if (!$isOwner) {
-            $userKec = strtolower(trim((string) ($auth->kecamatan ?? '')));
-            $userKel = strtolower(trim((string) ($auth->kelurahan ?? '')));
-
-            // Kalau user tidak punya kecamatan → tidak boleh lihat selain miliknya
             if ($userKec === '') {
-                return response()->json(['success' => false, 'message' => 'Unauthorized'], 403);
-            }
-
-            $itemKec = strtolower(trim((string) ($item->kecamatan ?? '')));
-            if ($itemKec === '' || $itemKec !== $userKec) {
-                // Kecamatan beda → tidak boleh
-                return response()->json(['success' => false, 'message' => 'Unauthorized'], 403);
-            }
-
-            // Kalau user tidak punya kelurahan → boleh lihat semua kelurahan di kecamatan tsb
-            if ($userKel !== '') {
-                $itemKel = strtolower(trim((string) ($item->kelurahan ?? '')));
-                if ($itemKel === '' || $itemKel !== $userKel) {
-                    return response()->json(['success' => false, 'message' => 'Unauthorized'], 403);
-                }
-            }
-        }
-    }
-
-    // ================= PERENCANAAN =================
-    $perencanaanRows = Perencanaan::where('uuidUsulan', $item->uuid)
-        ->orderBy('created_at', 'desc')
-        ->get();
-
-    $perencanaanData = $perencanaanRows->map(function ($p) {
-        return [
-            'uuidPerencanaan' => (string) $p->id,
-            'uuidUsulan'      => (string) $p->uuidUsulan,
-            'nilaiHPS'        => $p->nilaiHPS,
-            'catatanSurvey'   => $p->catatanSurvey,
-            'lembarKontrol'   => $p->lembarKontrol,
-            'dokumentasi'     => $p->dokumentasi ?? [],
-            'created_at'      => $p->created_at,
-            'updated_at'      => $p->updated_at,
-        ];
-    })->values();
-
-    // ================= PEMBANGUNAN =================
-    $pembangunanRows = Pembangunan::query()
-        ->where(function ($q) use ($item) {
-            $q->where('uuidUsulan', $item->uuid)
-              ->orWhereJsonContains('uuidUsulan', $item->uuid);
-        })
-        ->orderBy('created_at', 'desc')
-        ->get();
-
-    $pengawasKeys = $pembangunanRows->pluck('pengawasLapangan')
-        ->filter(fn ($v) => !empty($v))
-        ->map(fn ($v) => (string) $v)
-        ->unique()
-        ->values();
-
-    $usersById   = collect();
-    $usersByUuid = collect();
-
-    if ($pengawasKeys->isNotEmpty() && class_exists(\App\Models\User::class)) {
-        try {
-            $usersById = \App\Models\User::query()
-                ->select('id', 'name', 'username')
-                ->whereIn('id', $pengawasKeys)
-                ->get()
-                ->keyBy(fn ($u) => (string) $u->id);
-        } catch (\Throwable $e) {
-            $usersById = collect();
-        }
-
-        try {
-            $userTable = (new \App\Models\User)->getTable();
-            if (\Illuminate\Support\Facades\Schema::hasColumn($userTable, 'uuid')) {
-                $usersByUuid = \App\Models\User::query()
-                    ->select('uuid', 'name', 'username')
-                    ->whereIn('uuid', $pengawasKeys)
-                    ->get()
-                    ->keyBy(fn ($u) => (string) $u->uuid);
-            }
-        } catch (\Throwable $e) {
-            $usersByUuid = collect();
-        }
-    }
-
-    $pembangunanData = $pembangunanRows->map(function ($b) use ($usersById, $usersByUuid) {
-        $uuList = [];
-        $uuRaw  = $b->uuidUsulan;
-
-        if (is_array($uuRaw)) {
-            $uuList = $uuRaw;
-        } elseif (is_string($uuRaw)) {
-            $t = trim($uuRaw);
-            if ($t !== '' && str_starts_with($t, '[')) {
-                $arr = json_decode($t, true);
-                $uuList = is_array($arr) ? $arr : [];
-            } elseif ($t !== '') {
-                $uuList = [$t];
+                $q->where('user_id', (string) $user->id);
+            } else {
+                $q->where(function ($qq) use ($user, $userKec, $userKel) {
+                    $qq->where('user_id', (string) $user->id)
+                        ->orWhere(function ($sub) use ($userKec, $userKel) {
+                            $sub->whereRaw('LOWER(kecamatan) = ?', [$userKec]);
+                            if ($userKel !== '') {
+                                $sub->whereRaw('LOWER(COALESCE(kelurahan, "")) = ?', [$userKel]);
+                            }
+                        });
+                });
             }
         }
 
-        $uuidUsulanCount = collect($uuList)
-            ->map(fn ($v) => trim((string) $v))
-            ->filter(fn ($v) => $v !== '')
-            ->unique()
-            ->count();
+        $list = $q->get()->map(function ($item) {
+            return [
+                'uuid'      => $item->uuid,
+                'user_id'   => $item->user_id,
+                'user_name' => $item->user?->name,
 
-        $key  = (string) ($b->pengawasLapangan ?? '');
-        $name = null;
-        if ($key !== '') {
-            $u    = $usersById->get($key) ?? $usersByUuid->get($key);
-            $name = $u->name ?? $u->username ?? null;
-        }
+                'sumberUsulan'      => $item->sumberUsulan,
+                'namaAspirator'     => $item->namaAspirator,
+                'noKontakAspirator' => $item->noKontakAspirator,
 
-        return [
-            'uuidPembangunan'       => (string) $b->id,
-            'uuidUsulan'            => $uuList,
-            'nomorSPK'              => $b->nomorSPK,
-            'tanggalSPK'            => $b->tanggalSPK,
-            'nilaiKontrak'          => $b->nilaiKontrak,
-            'kontraktorPelaksana'   => $b->kontraktorPelaksana,
-            'tanggalMulai'          => $b->tanggalMulai,
-            'tanggalSelesai'        => $b->tanggalSelesai,
-            'jangkaWaktu'           => $b->jangkaWaktu,
-            'pengawasLapangan'      => $b->pengawasLapangan,
-            'pengawasLapangan_name' => $name,
-            'uuidUsulan_count'      => $uuidUsulanCount,
-            'created_at'            => $b->created_at,
-            'updated_at'            => $b->updated_at,
-        ];
-    })->values();
+                'kecamatan'   => $item->kecamatan,
+                'kelurahan'   => $item->kelurahan,
+                'titikLokasi' => $item->titikLokasi,
 
-    // ================= PENGAWASAN =================
-    $canSeeAllPengawasan = in_array($role, ['admin', 'admin_bidang', 'pengawas'], true) || $isOwner;
+                'nama_CPCL'      => $item->nama_CPCL,
+                'nomorNIK'       => $item->nomorNIK,
+                'nomorKK'        => $item->nomorKK,
+                'jumlahKeluarga' => $item->jumlahKeluarga,
 
-    $pengawasanRows = Pengawasan::query()
-        ->where('uuidUsulan', $item->uuid)
-        ->when(!$canSeeAllPengawasan, fn ($q) => $q->where('pengawas', (string) $auth->id))
-        ->orderByDesc('tanggal_pengawasan')
-        ->orderByDesc('created_at')
-        ->get();
+                'alamatDusun' => $item->alamatDusun,
+                'alamatRT'    => $item->alamatRT,
+                'alamatRW'    => $item->alamatRW,
 
-    $pengawasCatatanKeys = $pengawasanRows->pluck('pengawas')
-        ->filter(fn ($v) => !empty($v))
-        ->map(fn ($v) => (string) $v)
-        ->diff($pengawasKeys)
-        ->values();
-
-    if ($pengawasCatatanKeys->isNotEmpty() && class_exists(\App\Models\User::class)) {
-        try {
-            $addById = \App\Models\User::query()
-                ->select('id', 'name', 'username')
-                ->whereIn('id', $pengawasCatatanKeys)
-                ->get()
-                ->keyBy(fn ($u) => (string) $u->id);
-            $usersById = $usersById->merge($addById);
-        } catch (\Throwable $e) {}
-
-        try {
-            $userTable = (new \App\Models\User)->getTable();
-            if (\Illuminate\Support\Facades\Schema::hasColumn($userTable, 'uuid')) {
-                $addByUuid = \App\Models\User::query()
-                    ->select('uuid', 'name', 'username')
-                    ->whereIn('uuid', $pengawasCatatanKeys)
-                    ->get()
-                    ->keyBy(fn ($u) => (string) $u->uuid);
-                $usersByUuid = $usersByUuid->merge($addByUuid);
-            }
-        } catch (\Throwable $e) {}
-    }
-
-    $pengawasanData = $pengawasanRows->map(function ($r) use ($usersById, $usersByUuid) {
-        $k  = (string) ($r->pengawas ?? '');
-        $nm = null;
-        if ($k !== '') {
-            $u  = $usersById->get($k) ?? $usersByUuid->get($k);
-            $nm = $u->name ?? $u->username ?? null;
-        }
-
-        return [
-            'id'                 => (string) $r->id,
-            'uuidUsulan'         => (string) $r->uuidUsulan,
-            'uuidPembangunan'    => (string) $r->uuidPembangunan,
-            'pengawas'           => (string) $r->pengawas,
-            'pengawas_name'      => $nm,
-            'tanggal_pengawasan' => $r->tanggal_pengawasan,
-            'foto'               => is_array($r->foto) ? $r->foto : [],
-            'pesan_pengawasan'   => $r->pesan_pengawasan,
-            'created_at'         => $r->created_at,
-            'updated_at'         => $r->updated_at,
-        ];
-    })->values();
-
-    return response()->json([
-        'success' => true,
-        'data' => [
-            'usulan' => [
-                'uuid'                   => $item->uuid,
-
-                'sumberUsulan'           => $item->sumberUsulan,
-                'namaAspirator'          => $item->namaAspirator,
-                'noKontakAspirator'      => $item->noKontakAspirator,
-
-                'kecamatan'              => $item->kecamatan,
-                'kelurahan'              => $item->kelurahan,
-                'titikLokasi'            => $item->titikLokasi,
-
-                'nama_CPCL'              => $item->nama_CPCL,
-                'nomorNIK'               => $item->nomorNIK,
-                'nomorKK'                => $item->nomorKK,
-                'jumlahKeluarga'         => $item->jumlahKeluarga,
-                'alamatDusun'            => $item->alamatDusun,
-                'alamatRT'               => $item->alamatRT,
-                'alamatRW'               => $item->alamatRW,
                 'umur'                   => $item->umur,
                 'luasTanah'              => $item->luasTanah,
                 'luasBangunan'           => $item->luasBangunan,
@@ -748,155 +433,452 @@ class RutilahuController extends Controller
                 'jenisKawasan'           => $item->jenisKawasan,
                 'jenisProgram'           => $item->jenisProgram,
                 'jenisKelamin'           => $item->jenisKelamin,
-                'kondisiPondasi'         => $item->kondisiPondasi,
-                'kondisiSloof'           => $item->kondisiSloof,
-                'kondisiKolom'           => $item->kondisiKolom,
-                'kondisiRingBalok'       => $item->kondisiRingBalok,
-                'kondisiRangkaAtap'      => $item->kondisiRangkaAtap,
-                'kondisiDinding'         => $item->kondisiDinding,
-                'kondisiLantai'          => $item->kondisiLantai,
-                'kondisiPenutupAtap'     => $item->kondisiPenutupAtap,
-                'aksesAirMinum'          => $item->aksesAirMinum,
-                'aksesAirSanitasi'       => $item->aksesAirSanitasi,
 
-                'fotoKTP'                => $item->fotoKTP,
-                'fotoSuratTanah'         => $item->fotoSuratTanah,
-                'fotoRumah'              => $item->fotoRumah,
-                'fotoKK'                 => $item->fotoKK,
-                'dokumentasiSurvey'      => $item->dokumentasiSurvey,
+                'kondisiPondasi'     => $item->kondisiPondasi,
+                'kondisiSloof'       => $item->kondisiSloof,
+                'kondisiKolom'       => $item->kondisiKolom,
+                'kondisiRingBalok'   => $item->kondisiRingBalok,
+                'kondisiRangkaAtap'  => $item->kondisiRangkaAtap,
+                'kondisiDinding'     => $item->kondisiDinding,
+                'kondisiLantai'      => $item->kondisiLantai,
+                'kondisiPenutupAtap' => $item->kondisiPenutupAtap,
+                'aksesAirMinum'      => $item->aksesAirMinum,
+                'aksesAirSanitasi'   => $item->aksesAirSanitasi,
 
-                'pesan_verifikasi'        => $item->pesan_verifikasi,
-                'status_verifikasi_usulan'=> $item->status_verifikasi_usulan,
-                'created_at'              => $item->created_at,
+                'fotoKTP'           => $item->fotoKTP ?? [],
+                'fotoSuratTanah'    => $item->fotoSuratTanah ?? [],
+                'fotoRumah'         => $item->fotoRumah ?? [],
+                'fotoKK'            => $item->fotoKK ?? [],
+                'dokumentasiSurvey' => $item->dokumentasiSurvey ?? [],
+
+                'pesan_verifikasi'         => $item->pesan_verifikasi,
+                'status_verifikasi_usulan' => $item->status_verifikasi_usulan,
+                'created_at'               => $item->created_at,
+                'updated_at'               => $item->updated_at,
+            ];
+        });
+
+        return response()->json([
+            'success' => true,
+            'data'    => $list,
+        ]);
+    }
+
+    /** GET /rutilahu/{uuid} */
+    public function show(string $uuid)
+    {
+        $auth = auth()->user();
+        if (!$auth) {
+            return response()->json(['success' => false, 'message' => 'Unauthenticated'], 401);
+        }
+
+        $item = Rutilahu::where('uuid', $uuid)->first();
+        if (!$item) {
+            return response()->json(['success' => false, 'message' => 'Data tidak ditemukan'], 404);
+        }
+
+        $role    = strtolower((string) ($auth->role ?? ''));
+        $isOwner = (string) ($item->user_id ?? '') === (string) $auth->id;
+        $isPriv  = in_array($role, ['admin', 'admin_bidang', 'operator', 'pengawas'], true);
+
+        if (!$isPriv && !$isOwner) {
+            $userKec = strtolower(trim((string) ($auth->kecamatan ?? '')));
+            $userKel = strtolower(trim((string) ($auth->kelurahan ?? '')));
+
+            if ($userKec === '') {
+                return response()->json(['success' => false, 'message' => 'Unauthorized'], 403);
+            }
+
+            $itemKec = strtolower(trim((string) ($item->kecamatan ?? '')));
+            if ($itemKec === '' || $itemKec !== $userKec) {
+                return response()->json(['success' => false, 'message' => 'Unauthorized'], 403);
+            }
+    
+            if ($userKel !== '') {
+                $itemKel = strtolower(trim((string) ($item->kelurahan ?? '')));
+                if ($itemKel === '' || $itemKel !== $userKel) {
+                    return response()->json(['success' => false, 'message' => 'Unauthorized'], 403);
+                }
+            }
+        }
+
+        $perencanaanRows = Perencanaan::where('uuidUsulan', $item->uuid)
+            ->orderByDesc('created_at')
+            ->get();
+
+        $perencanaanData = $perencanaanRows->map(function ($p) {
+            return [
+                'uuidPerencanaan' => (string) $p->id,
+                'uuidUsulan'      => (string) $p->uuidUsulan,
+                'nilaiHPS'        => $p->nilaiHPS,
+                'catatanSurvey'   => $p->catatanSurvey,
+                'lembarKontrol'   => $p->lembarKontrol,
+                'dokumentasi'     => $p->dokumentasi ?? [],
+                'created_at'      => $p->created_at,
+                'updated_at'      => $p->updated_at,
+            ];
+        })->values();
+
+        $pembangunanRows = Pembangunan::query()
+            ->where(function ($q) use ($item) {
+                $q->where('uuidUsulan', $item->uuid)
+                  ->orWhereJsonContains('uuidUsulan', $item->uuid);
+            })
+            ->orderByDesc('created_at')
+            ->get();
+
+        $pengawasKeys = $pembangunanRows->pluck('pengawasLapangan')
+            ->filter(fn ($v) => !empty($v))
+            ->map(fn ($v) => (string) $v)
+            ->unique()
+            ->values();
+
+        $usersById   = collect();
+        $usersByUuid = collect();
+
+        if ($pengawasKeys->isNotEmpty()) {
+            try {
+                $usersById = User::query()
+                    ->select('id', 'name', 'username')
+                    ->whereIn('id', $pengawasKeys)
+                    ->get()
+                    ->keyBy(fn ($u) => (string) $u->id);
+            } catch (\Throwable $e) {
+                $usersById = collect();
+            }
+
+            try {
+                $userTable = (new User)->getTable();
+                if (Schema::hasColumn($userTable, 'uuid')) {
+                    $usersByUuid = User::query()
+                        ->select('uuid', 'name', 'username')
+                        ->whereIn('uuid', $pengawasKeys)
+                        ->get()
+                        ->keyBy(fn ($u) => (string) $u->uuid);
+                }
+            } catch (\Throwable $e) {
+                $usersByUuid = collect();
+            }
+        }
+
+        $pembangunanData = $pembangunanRows->map(function ($b) use ($usersById, $usersByUuid) {
+            $uuList = [];
+            $uuRaw  = $b->uuidUsulan;
+
+            if (is_array($uuRaw)) {
+                $uuList = $uuRaw;
+            } elseif (is_string($uuRaw)) {
+                $t = trim($uuRaw);
+                if ($t !== '' && str_starts_with($t, '[')) {
+                    $arr = json_decode($t, true);
+                    $uuList = is_array($arr) ? $arr : [];
+                } elseif ($t !== '') {
+                    $uuList = [$t];
+                }
+            }
+
+            $uuidUsulanCount = collect($uuList)
+                ->map(fn ($v) => trim((string) $v))
+                ->filter(fn ($v) => $v !== '')
+                ->unique()
+                ->count();
+
+            $key  = (string) ($b->pengawasLapangan ?? '');
+            $name = null;
+            if ($key !== '') {
+                $u    = $usersById->get($key) ?? $usersByUuid->get($key);
+                $name = $u->name ?? $u->username ?? null;
+            }
+
+            return [
+                'uuidPembangunan'       => (string) $b->id,
+                'uuidUsulan'            => $uuList,
+                'nomorSPK'              => $b->nomorSPK,
+                'tanggalSPK'            => $b->tanggalSPK,
+                'nilaiKontrak'          => $b->nilaiKontrak,
+                'kontraktorPelaksana'   => $b->kontraktorPelaksana,
+                'tanggalMulai'          => $b->tanggalMulai,
+                'tanggalSelesai'        => $b->tanggalSelesai,
+                'jangkaWaktu'           => $b->jangkaWaktu,
+                'pengawasLapangan'      => $b->pengawasLapangan,
+                'pengawasLapangan_name' => $name,
+                'uuidUsulan_count'      => $uuidUsulanCount,
+                'created_at'            => $b->created_at,
+                'updated_at'            => $b->updated_at,
+            ];
+        })->values();
+
+        $canSeeAllPengawasan = in_array($role, ['admin', 'admin_bidang', 'pengawas'], true) || $isOwner;
+
+        $pengawasanRows = Pengawasan::query()
+            ->where('uuidUsulan', $item->uuid)
+            ->when(!$canSeeAllPengawasan, fn ($q) => $q->where('pengawas', (string) $auth->id))
+            ->orderByDesc('tanggal_pengawasan')
+            ->orderByDesc('created_at')
+            ->get();
+
+        $pengawasCatatanKeys = $pengawasanRows->pluck('pengawas')
+            ->filter(fn ($v) => !empty($v))
+            ->map(fn ($v) => (string) $v)
+            ->diff($pengawasKeys)
+            ->values();
+
+        if ($pengawasCatatanKeys->isNotEmpty()) {
+            try {
+                $addById = User::query()
+                    ->select('id', 'name', 'username')
+                    ->whereIn('id', $pengawasCatatanKeys)
+                    ->get()
+                    ->keyBy(fn ($u) => (string) $u->id);
+                $usersById = $usersById->merge($addById);
+            } catch (\Throwable $e) {}
+
+            try {
+                $userTable = (new User)->getTable();
+                if (Schema::hasColumn($userTable, 'uuid')) {
+                    $addByUuid = User::query()
+                        ->select('uuid', 'name', 'username')
+                        ->whereIn('uuid', $pengawasCatatanKeys)
+                        ->get()
+                        ->keyBy(fn ($u) => (string) $u->uuid);
+                    $usersByUuid = $usersByUuid->merge($addByUuid);
+                }
+            } catch (\Throwable $e) {}
+        }
+
+        $pengawasanData = $pengawasanRows->map(function ($r) use ($usersById, $usersByUuid) {
+            $k  = (string) ($r->pengawas ?? '');
+            $nm = null;
+            if ($k !== '') {
+                $u  = $usersById->get($k) ?? $usersByUuid->get($k);
+                $nm = $u->name ?? $u->username ?? null;
+            }
+
+            return [
+                'id'                 => (string) $r->id,
+                'uuidUsulan'         => (string) $r->uuidUsulan,
+                'uuidPembangunan'    => (string) $r->uuidPembangunan,
+                'pengawas'           => (string) $r->pengawas,
+                'pengawas_name'      => $nm,
+                'tanggal_pengawasan' => $r->tanggal_pengawasan,
+                'foto'               => is_array($r->foto) ? $r->foto : [],
+                'pesan_pengawasan'   => $r->pesan_pengawasan,
+                'created_at'         => $r->created_at,
+                'updated_at'         => $r->updated_at,
+            ];
+        })->values();
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'usulan' => [
+                    'uuid'                   => $item->uuid,
+                    'sumberUsulan'           => $item->sumberUsulan,
+                    'namaAspirator'          => $item->namaAspirator,
+                    'noKontakAspirator'      => $item->noKontakAspirator,
+                    'kecamatan'              => $item->kecamatan,
+                    'kelurahan'              => $item->kelurahan,
+                    'titikLokasi'            => $item->titikLokasi,
+                    'nama_CPCL'              => $item->nama_CPCL,
+                    'nomorNIK'               => $item->nomorNIK,
+                    'nomorKK'                => $item->nomorKK,
+                    'jumlahKeluarga'         => $item->jumlahKeluarga,
+                    'alamatDusun'            => $item->alamatDusun,
+                    'alamatRT'               => $item->alamatRT,
+                    'alamatRW'               => $item->alamatRW,
+                    'umur'                   => $item->umur,
+                    'luasTanah'              => $item->luasTanah,
+                    'luasBangunan'           => $item->luasBangunan,
+                    'pendidikanTerakhir'     => $item->pendidikanTerakhir,
+                    'pekerjaan'              => $item->pekerjaan,
+                    'besaranPenghasilan'     => $item->besaranPenghasilan,
+                    'statusKepemilikanRumah' => $item->statusKepemilikanRumah,
+                    'asetRumahLain'          => $item->asetRumahLain,
+                    'asetTanahLain'          => $item->asetTanahLain,
+                    'sumberPenerangan'       => $item->sumberPenerangan,
+                    'bantuanPerumahan'       => $item->bantuanPerumahan,
+                    'jenisKawasan'           => $item->jenisKawasan,
+                    'jenisProgram'           => $item->jenisProgram,
+                    'jenisKelamin'           => $item->jenisKelamin,
+                    'kondisiPondasi'         => $item->kondisiPondasi,
+                    'kondisiSloof'           => $item->kondisiSloof,
+                    'kondisiKolom'           => $item->kondisiKolom,
+                    'kondisiRingBalok'       => $item->kondisiRingBalok,
+                    'kondisiRangkaAtap'      => $item->kondisiRangkaAtap,
+                    'kondisiDinding'         => $item->kondisiDinding,
+                    'kondisiLantai'          => $item->kondisiLantai,
+                    'kondisiPenutupAtap'     => $item->kondisiPenutupAtap,
+                    'aksesAirMinum'          => $item->aksesAirMinum,
+                    'aksesAirSanitasi'       => $item->aksesAirSanitasi,
+                    'fotoKTP'                => $item->fotoKTP,
+                    'fotoSuratTanah'         => $item->fotoSuratTanah,
+                    'fotoRumah'              => $item->fotoRumah,
+                    'fotoKK'                 => $item->fotoKK,
+                    'dokumentasiSurvey'      => $item->dokumentasiSurvey,
+                    'pesan_verifikasi'       => $item->pesan_verifikasi,
+                    'status_verifikasi_usulan'=> $item->status_verifikasi_usulan,
+                    'created_at'             => $item->created_at,
+                ],
+                'perencanaan' => $perencanaanData,
+                'pembangunan' => $pembangunanData,
+                'pengawasan'  => $pengawasanData,
             ],
-            'perencanaan' => $perencanaanData,
-            'pembangunan' => $pembangunanData,
-            'pengawasan'  => $pengawasanData,
-        ]
-    ]);
-}
+        ]);
+    }
 
     /** DELETE /rutilahu/{uuid} */
     public function destroy(string $uuid)
-{
-    $auth = auth()->user();
-    if (!$auth) {
-        return response()->json([
-            'success' => false,
-            'message' => 'Unauthenticated',
-        ], 401);
-    }
+    {
+        $auth = auth()->user();
+        if (!$auth) {
+            return response()->json(['success' => false, 'message' => 'Unauthenticated'], 401);
+        }
 
-    $role = strtolower((string) ($auth->role ?? ''));
-    if ($role !== 'admin') {
-        return response()->json([
-            'success' => false,
-            'message' => 'Unauthorized. Hanya admin yang boleh menghapus data.',
-        ], 403);
-    }
+        $item = Rutilahu::where('uuid', $uuid)->first();
+        if (!$item) {
+            return response()->json(['success' => false, 'message' => 'Data tidak ditemukan'], 404);
+        }
 
-    // === Ambil data utama ===
-    $item = Rutilahu::where('uuid', $uuid)->first();
-    if (!$item) {
-        return response()->json([
-            'success' => false,
-            'message' => 'Data tidak ditemukan',
-        ], 404);
-    }
+        $role    = strtolower((string) ($auth->role ?? ''));
+        $isAdmin = ($role === 'admin');
+        $isOper  = ($role === 'operator');
+        $isOwner = (string) ($item->user_id ?? '') === (string) ($auth->id ?? '');
 
-    \DB::transaction(function () use ($uuid, $item) {
-        // Hapus semua perencanaan yang terkait
-        Perencanaan::where('uuidUsulan', $uuid)->delete();
+        if (!($isAdmin || $isOper || $isOwner)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized. Hanya admin, operator, atau pemilik data yang boleh menghapus.',
+            ], 403);
+        }
 
-        // Cabut UUID usulan ini dari daftar uuidUsulan di Pembangunan
-        $buildRows = Pembangunan::query()
-            ->where(function ($q) use ($uuid) {
-                $q->where('uuidUsulan', $uuid)
-                  ->orWhereJsonContains('uuidUsulan', $uuid);
-            })
-            ->get();
+        $fileFields = ['fotoKTP', 'fotoSuratTanah', 'fotoRumah', 'fotoKK', 'dokumentasiSurvey'];
 
-        $needleLower = strtolower($uuid);
+        $fileUuids = [];
+        foreach ($fileFields as $f) {
+            $arr = $item->getAttribute($f);
 
-        foreach ($buildRows as $b) {
-            $raw = $b->getAttribute('uuidUsulan');
+            if (is_array($arr)) {
+                $fileUuids = array_merge($fileUuids, $arr);
+            } elseif (is_string($arr) && trim($arr) !== '') {
+                $dec = json_decode($arr, true);
+                if (is_array($dec)) {
+                    $fileUuids = array_merge($fileUuids, $dec);
+                }
+            }
+        }
 
-            if (is_array($raw)) {
-                $arr = $raw;
-            } elseif (is_string($raw)) {
-                $t = trim($raw);
-                if ($t !== '' && str_starts_with($t, '[')) {
-                    $dec = json_decode($t, true);
-                    $arr = is_array($dec) ? $dec : [];
-                } elseif ($t !== '') {
-                    $arr = [$t];
+        $fileUuids = array_values(array_unique(array_filter(array_map('strval', $fileUuids))));
+
+        $finalPaths = [];
+        $tempPaths  = [];
+
+        if ($fileUuids) {
+            $finalPaths = RutilahuUpload::whereIn('uuid', $fileUuids)->pluck('file_path')->filter()->values()->all();
+            $tempPaths  = RutilahuUploadTemp::whereIn('uuid', $fileUuids)->pluck('file_path')->filter()->values()->all();
+        }
+
+        DB::transaction(function () use ($uuid, $item, $fileUuids) {
+            Perencanaan::where('uuidUsulan', $uuid)->delete();
+            Pengawasan::where('uuidUsulan', $uuid)->delete();
+
+            $buildRows = Pembangunan::query()
+                ->where(function ($q) use ($uuid) {
+                    $q->whereJsonContains('uuidUsulan', $uuid)
+                      ->orWhere('uuidUsulan', $uuid)
+                      ->orWhere('uuidUsulan', 'like', '%"' . $uuid . '"%');
+                })
+                ->get();
+
+            $needleLower = strtolower($uuid);
+
+            foreach ($buildRows as $b) {
+                $raw = $b->getAttribute('uuidUsulan');
+
+                if (is_array($raw)) {
+                    $arr = $raw;
+                } elseif (is_string($raw)) {
+                    $t = trim($raw);
+                    if ($t !== '' && str_starts_with($t, '[')) {
+                        $dec = json_decode($t, true);
+                        $arr = is_array($dec) ? $dec : [];
+                    } elseif ($t !== '') {
+                        $arr = [$t];
+                    } else {
+                        $arr = [];
+                    }
                 } else {
                     $arr = [];
                 }
-            } else {
-                $arr = [];
+
+                $after = collect($arr)
+                    ->map(fn ($v) => trim((string) $v))
+                    ->filter(fn ($v) => $v !== '' && strtolower($v) !== $needleLower)
+                    ->values()
+                    ->all();
+
+                if (empty($after)) {
+                    $b->delete();
+                } else {
+                    $b->uuidUsulan = $after;
+                    $b->save();
+                }
             }
 
-            $after = collect($arr)
-                ->map(fn ($v) => trim((string) $v))
-                ->filter(fn ($v) => $v !== '' && strtolower($v) !== $needleLower)
-                ->values()
-                ->all();
+            if ($fileUuids) {
+                RutilahuUpload::whereIn('uuid', $fileUuids)->delete();
+                RutilahuUploadTemp::whereIn('uuid', $fileUuids)->delete();
+            }
 
-            $b->uuidUsulan = $after ? $after : null;
-            $b->save();
+            $item->delete();
+        });
+
+        foreach (array_unique(array_merge($finalPaths, $tempPaths)) as $p) {
+            try {
+                if ($p && Storage::exists($p)) {
+                    Storage::delete($p);
+                }
+            } catch (\Throwable $e) {
+                // optional log
+            }
         }
 
-        // Terakhir, hapus usulan utama
-        $item->delete();
-    });
-
-    return response()->json([
-        'success' => true,
-        'message' => 'Data berhasil dihapus; perencanaan dibersihkan dan UUID dicabut dari pembangunan.',
-        'uuid'    => $uuid,
-    ]);
-}
-
-    /** GET /rutilahu/{uuid} */
-   
+        return response()->json([
+            'success' => true,
+            'message' => 'Data berhasil dihapus; perencanaan & pengawasan dibersihkan, UUID dicabut dari pembangunan (row kosong dihapus), dan file ikut terhapus.',
+            'uuid'    => $uuid,
+        ]);
+    }
 
     // ================= Helpers =================
 
-    /** Aliases snake_case → camelCase, termasuk file, sumber usulan, kondisi, akses. */
     private function applyAliases(Request $request): void
     {
         $aliases = [
-            // file arrays
-            'foto_ktp'               => 'fotoKTP',
-            'foto_surat_tanah'       => 'fotoSuratTanah',
-            'foto_rumah'             => 'fotoRumah',
-            'foto_kk'                => 'fotoKK',
-            'dokumentasi_survey'     => 'dokumentasiSurvey',
+            'foto_ktp'           => 'fotoKTP',
+            'foto_surat_tanah'   => 'fotoSuratTanah',
+            'foto_rumah'         => 'fotoRumah',
+            'foto_kk'            => 'fotoKK',
+            'dokumentasi_survey' => 'dokumentasiSurvey',
 
-            // sumber usulan & aspirator
-            'sumber_usulan'          => 'sumberUsulan',
-            'nama_aspirator'         => 'namaAspirator',
-            'no_kontak_aspirator'    => 'noKontakAspirator',
+            'sumber_usulan'       => 'sumberUsulan',
+            'nama_aspirator'      => 'namaAspirator',
+            'no_kontak_aspirator' => 'noKontakAspirator',
 
-            // lainnya
-            'pesanVerifikasi'        => 'pesan_verifikasi',
-            'jenis_kelamin'          => 'jenisKelamin',
-            'titik_lokasi'           => 'titikLokasi',
+            'pesanVerifikasi' => 'pesan_verifikasi',
+            'jenis_kelamin'   => 'jenisKelamin',
+            'titik_lokasi'    => 'titikLokasi',
 
-            // KONDISI (snake → camel)
-            'kondisi_pondasi'        => 'kondisiPondasi',
-            'kondisi_sloof'          => 'kondisiSloof',
-            'kondisi_kolom'          => 'kondisiKolom',
-            'kondisi_ring_balok'     => 'kondisiRingBalok',
-            'kondisi_rangka_atap'    => 'kondisiRangkaAtap',
-            'kondisi_dinding'        => 'kondisiDinding',
-            'kondisi_lantai'         => 'kondisiLantai',
-            'kondisi_penutup_atap'   => 'kondisiPenutupAtap',
+            'kondisi_pondasi'      => 'kondisiPondasi',
+            'kondisi_sloof'        => 'kondisiSloof',
+            'kondisi_kolom'        => 'kondisiKolom',
+            'kondisi_ring_balok'   => 'kondisiRingBalok',
+            'kondisi_rangka_atap'  => 'kondisiRangkaAtap',
+            'kondisi_dinding'      => 'kondisiDinding',
+            'kondisi_lantai'       => 'kondisiLantai',
+            'kondisi_penutup_atap' => 'kondisiPenutupAtap',
 
-            // AKSES
-            'akses_air_minum'        => 'aksesAirMinum',
-            'akses_air_sanitasi'     => 'aksesAirSanitasi',
+            'akses_air_minum'    => 'aksesAirMinum',
+            'akses_air_sanitasi' => 'aksesAirSanitasi',
         ];
 
         $merge = [];
@@ -910,7 +892,6 @@ class RutilahuController extends Controller
         }
     }
 
-    /** Normalisasi input array-UUID dari berbagai bentuk (JSON/CSV/single/path). */
     private function normalizeUuidArrayField(Request $request, string $field): void
     {
         if (!$request->has($field)) {
@@ -975,7 +956,6 @@ class RutilahuController extends Controller
         }
     }
 
-    /** Ubah "", "null", whitespace → null untuk daftar field (nullable). */
     private function nullifyEmpty(Request $request, array $fields): void
     {
         $merge = [];
@@ -992,7 +972,6 @@ class RutilahuController extends Controller
         }
     }
 
-    /** Ekstrak UUID v1–v5 dari string/path. */
     private function extractUuid(string $value): ?string
     {
         if (preg_match('/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}/', $value, $m)) {
@@ -1019,7 +998,6 @@ class RutilahuController extends Controller
         }
     }
 
-    /** Pindahkan file dari TEMP → FINAL untuk daftar UUID (user yang sama). */
     private function moveTempsToFinal(array $fileUuids, string $userId): void
     {
         $fileUuids = array_values(array_unique(array_filter($fileUuids)));
@@ -1035,11 +1013,10 @@ class RutilahuController extends Controller
         foreach ($fileUuids as $u) {
             $temp = $temps->get($u);
             if (!$temp) {
-                // mungkin sudah final (reuse)
                 continue;
             }
 
-            $oldPath = $temp->file_path; // rutilahu_temp/<timestamp>_<uuid>.<ext>
+            $oldPath = $temp->file_path;
             $ext     = strtolower(pathinfo($oldPath, PATHINFO_EXTENSION) ?: 'bin');
             $newPath = 'rutilahu_final/' . $u . '.' . $ext;
 

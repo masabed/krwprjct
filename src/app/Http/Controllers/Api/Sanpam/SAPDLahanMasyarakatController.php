@@ -192,73 +192,168 @@ class SAPDLahanMasyarakatController extends Controller
      * DELETE /api/sanpam/lahan/{uuid}
      */
     public function destroy(string $uuid)
-    {
-        // 0) Ambil usulan
-        $item = SAPDLahanMasyarakat::where('uuid', $uuid)->first();
-        if (!$item) {
-            return response()->json(['success' => false, 'message' => 'Data tidak ditemukan'], 404);
+{
+    // 0) Auth
+    $auth = auth()->user();
+    if (!$auth) {
+        return response()->json(['success' => false, 'message' => 'Unauthenticated'], 401);
+    }
+
+    // 1) Ambil usulan
+    /** @var \App\Models\SAPDLahanMasyarakat|null $item */
+    $item = \App\Models\SAPDLahanMasyarakat::where('uuid', $uuid)->first();
+    if (!$item) {
+        return response()->json(['success' => false, 'message' => 'Data tidak ditemukan'], 404);
+    }
+
+    // 2) Access control: admin/operator/owner
+    $role    = strtolower((string) ($auth->role ?? ''));
+    $isAdmin = ($role === 'admin');
+    $isOper  = ($role === 'operator');
+    $isOwner = (string) ($item->user_id ?? '') === (string) ($auth->id ?? '');
+
+    if (!($isAdmin || $isOper || $isOwner)) {
+        return response()->json([
+            'success' => false,
+            'message' => 'Unauthorized. Anda Tidak Berwenang.',
+        ], 403);
+    }
+
+    // helper normalisasi: null|string(JSON)|string single|array -> array<string>
+    $toArray = function ($val): array {
+        if (is_null($val)) return [];
+        if (is_array($val)) {
+            return collect($val)->map(fn($v)=>(string)$v)->map(fn($v)=>trim($v))->filter()->values()->all();
         }
+        $s = trim((string)$val);
+        if ($s === '') return [];
+        if (str_starts_with($s, '[')) {
+            $arr = json_decode($s, true);
+            return is_array($arr)
+                ? collect($arr)->map(fn($v)=>(string)$v)->map(fn($v)=>trim($v))->filter()->values()->all()
+                : [$s];
+        }
+        return [$s];
+    };
 
-        \DB::transaction(function () use ($uuid, $item) {
-            // 1) Hapus semua Perencanaan yang menempel pada usulan ini
-            Perencanaan::where('uuidUsulan', $uuid)->delete();
+    // 3) Kumpulkan UUID file dari row usulan
+    $fileUuids = [];
+    foreach (self::FILE_ARRAY_FIELDS as $f) {
+        $arr = $item->getAttribute($f);
+        if (is_array($arr)) {
+            $fileUuids = array_merge($fileUuids, $arr);
+        }
+    }
+    $fileUuids = array_values(array_unique(array_filter(array_map('strval', $fileUuids))));
 
-            // 2) Cabut UUID usulan ini dari setiap row Pembangunan yang menempel
-            $buildRows = Pembangunan::query()
-                ->where(function($q) use ($uuid) {
-                    $q->where('uuidUsulan', $uuid)                // legacy string
-                      ->orWhereJsonContains('uuidUsulan', $uuid); // JSON array
-                })
-                ->get();
+    // Ambil path FINAL/TEMP untuk dihapus SETELAH transaksi DB sukses
+    $finalPaths = [];
+    $tempPaths  = [];
+    if (!empty($fileUuids)) {
+        $finalPaths = \App\Models\SAPDUpload::whereIn('uuid', $fileUuids)
+            ->pluck('file_path')->filter()->values()->all();
 
-            $needleLower = strtolower($uuid);
+        $tempPaths = \App\Models\SAPDUploadTemp::whereIn('uuid', $fileUuids)
+            ->pluck('file_path')->filter()->values()->all();
+    }
 
-            foreach ($buildRows as $b) {
-                $raw = $b->getAttribute('uuidUsulan');
+    // token yang dicabut dari relasi: uuid + PK fallback
+    $usulanUuid = (string) $item->uuid;
+    $usulanId   = (string) $item->getKey();
+    $tokens     = array_values(array_unique(array_filter([$usulanUuid, $usulanId])));
 
-                // Normalisasi ke array
-                if (is_array($raw)) {
-                    $arr = $raw;
-                } elseif (is_string($raw)) {
-                    $t = trim($raw);
-                    if ($t !== '' && str_starts_with($t, '[')) {
-                        $dec = json_decode($t, true);
-                        $arr = is_array($dec) ? $dec : [];
-                    } elseif ($t !== '') {
-                        $arr = [$t]; // legacy single
-                    } else {
-                        $arr = [];
-                    }
-                } else {
-                    $arr = [];
+    $result = [
+        'deleted_perencanaan' => 0,
+        'deleted_pengawasan'  => 0,
+        'updated_pembangunan' => 0,
+        'deleted_pembangunan' => 0,
+        'deleted_files'       => 0,
+        'deleted_upload_meta' => 0,
+    ];
+
+    \DB::transaction(function () use ($item, $tokens, $toArray, $fileUuids, &$result) {
+
+        // 1) Hapus Perencanaan terkait
+        $result['deleted_perencanaan'] = \App\Models\Perencanaan::query()
+            ->where(function ($q) use ($tokens) {
+                foreach ($tokens as $t) $q->orWhere('uuidUsulan', $t);
+            })
+            ->delete();
+
+        // 2) Hapus Pengawasan terkait (INI YANG KAMU MINTA)
+        $result['deleted_pengawasan'] = \App\Models\Pengawasan::query()
+            ->where(function ($q) use ($tokens) {
+                foreach ($tokens as $t) $q->orWhere('uuidUsulan', $t);
+            })
+            ->delete();
+
+        // 3) Cabut UUID dari Pembangunan (kalau kosong -> delete row pembangunan)
+        $rows = \App\Models\Pembangunan::query()
+            ->whereNotNull('uuidUsulan')
+            ->where(function ($q) use ($tokens) {
+                foreach ($tokens as $t) {
+                    $q->orWhereJsonContains('uuidUsulan', $t)
+                      ->orWhere('uuidUsulan', $t)
+                      ->orWhere('uuidUsulan', 'like', '%"'.$t.'"%')
+                      ->orWhere('uuidUsulan', 'like', '%'.$t.'%');
                 }
+            })
+            ->lockForUpdate()
+            ->get();
 
-                // Cabut uuid target (case-insensitive)
-                $after = collect($arr)
-                    ->map(fn($v) => trim((string)$v))
-                    ->filter(fn($v) => $v !== '' && strtolower($v) !== $needleLower)
-                    ->values()
-                    ->all();
+        foreach ($rows as $b) {
+            $after = collect($toArray($b->uuidUsulan))
+                ->reject(fn($v) => in_array((string)$v, $tokens, true))
+                ->values()
+                ->all();
 
-                // Simpan balik: kosong → null; else → array
-                $b->uuidUsulan = $after ? $after : null;
-                $b->save();
+            if (empty($after)) {
+                $b->delete();
+                $result['deleted_pembangunan']++;
+                continue;
             }
 
-            // 3) Hapus usulan utamanya
-            $item->delete();
-        });
+            $b->uuidUsulan = $after; // simpan array
+            $b->save();
+            $result['updated_pembangunan']++;
+        }
 
-        return response()->json([
-            'success' => true,
-            'message' => 'Data berhasil dihapus; relasi perencanaan dihapus dan UUID dicabut dari pembangunan.',
-        ]);
+        // 4) Hapus metadata upload (final/temp)
+        if (!empty($fileUuids)) {
+            $a = \App\Models\SAPDUpload::whereIn('uuid', $fileUuids)->delete();
+            $b = \App\Models\SAPDUploadTemp::whereIn('uuid', $fileUuids)->delete();
+            $result['deleted_upload_meta'] = (int) $a + (int) $b;
+        }
+
+        // 5) Hapus usulan utamanya
+        $item->delete();
+    });
+
+    // 6) Hapus file fisik (setelah transaksi DB sukses)
+    $allPaths = array_values(array_unique(array_filter(array_merge($finalPaths, $tempPaths))));
+    foreach ($allPaths as $p) {
+        try {
+            if ($p && \Illuminate\Support\Facades\Storage::exists($p)) {
+                \Illuminate\Support\Facades\Storage::delete($p);
+                $result['deleted_files']++;
+            }
+        } catch (\Throwable $e) {
+            // optional: log kalau perlu
+        }
     }
+
+    return response()->json([
+        'success' => true,
+        'message' => 'Data berhasil dihapus; perencanaan & pengawasan dibersihkan, UUID dicabut dari pembangunan (yang kosong ikut terhapus), dan file ikut terhapus.',
+        'result'  => $result,
+    ]);
+}
+
 
     /**
      * GET /api/sanpam/lahan
      */
-    public function index(Request $request)
+   public function index(Request $request)
 {
     $auth = auth()->user();
     if (!$auth) {
@@ -271,7 +366,10 @@ class SAPDLahanMasyarakatController extends Controller
     $role   = strtolower((string) ($auth->role ?? ''));
     $isPriv = in_array($role, ['admin', 'admin_bidang', 'operator', 'pengawas'], true);
 
-    $q = SAPDLahanMasyarakat::query()->latest();
+    // ✅ eager load user utk ambil name (hindari N+1)
+    $q = SAPDLahanMasyarakat::query()
+        ->with(['user:id,name'])
+        ->latest();
 
     if ($isPriv) {
         if ($request->boolean('mine')) {
@@ -290,7 +388,7 @@ class SAPDLahanMasyarakatController extends Controller
                        $sub->whereRaw('LOWER(kecamatan) = ?', [$userKec]);
 
                        if ($userKel !== '') {
-                           // ✅ FIX: pakai '' (single quote) bukan \"\"
+                           // tetap aman: COALESCE kelurahan kosong jadi ''
                            $sub->whereRaw("LOWER(COALESCE(kelurahan, '')) = ?", [$userKel]);
                        }
                    });
@@ -301,6 +399,9 @@ class SAPDLahanMasyarakatController extends Controller
     $items = $q->get()->map(function ($it) {
         return [
             'uuid'                     => $it->uuid,
+            'user_id'                  => $it->user_id,
+            'user_name'                => $it->user?->name, // ✅ tambahan
+
             'sumberUsulan'             => $it->sumberUsulan,
             'namaAspirator'            => $it->namaAspirator,
             'noKontakAspirator'        => $it->noKontakAspirator,
@@ -333,7 +434,6 @@ class SAPDLahanMasyarakatController extends Controller
         'data'    => $items,
     ]);
 }
-
 
 
     /**

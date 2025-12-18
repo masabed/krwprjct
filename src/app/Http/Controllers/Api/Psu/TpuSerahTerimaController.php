@@ -441,39 +441,185 @@ class TpuSerahTerimaController extends Controller
      * DELETE /api/psu/tpu/serah-terima/{id}
      */
     public function destroy(string $id)
-    {
-        $user = auth()->user();
-        if (!$user) {
-            return response()->json(['success' => false, 'message' => 'Unauthenticated'], 401);
-        }
-
-        $row = TpuSerahTerima::find($id);
-        if (!$row) {
-            return response()->json(['success' => false, 'message' => 'Data tidak ditemukan'], 404);
-        }
-
-        $role    = strtolower((string) ($user->role ?? ''));
-        $isAdmin = in_array($role, ['admin', 'admin_bidang'], true);
-
-        if (!$isAdmin && (string) $row->user_id !== (string) $user->id) {
-            return response()->json(['success' => false, 'message' => 'Forbidden'], 403);
-        }
-
-        // Hapus file FINAL di semua field dokumen
-        foreach (self::FILE_FIELDS as $f) {
-            $uuids = $row->getAttribute($f) ?? [];
-            if (is_array($uuids) && !empty($uuids)) {
-                $this->deleteFinalUploads($uuids);
-            }
-        }
-
-        $row->delete();
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Data berhasil dihapus',
-        ]);
+{
+    $user = auth()->user();
+    if (!$user) {
+        return response()->json(['success' => false, 'message' => 'Unauthenticated'], 401);
     }
+
+    /** @var \App\Models\TpuSerahTerima|null $row */
+    $row = \App\Models\TpuSerahTerima::find($id);
+    if (!$row) {
+        return response()->json(['success' => false, 'message' => 'Data tidak ditemukan'], 404);
+    }
+
+    // === ACCESS CONTROL: admin/operator/owner ===
+    $role     = strtolower((string) ($user->role ?? ''));
+    $isAdmin  = in_array($role, ['admin', 'admin_bidang'], true);
+    $isOper   = ($role === 'operator');
+    $isOwner  = (string) ($row->user_id ?? '') === (string) ($user->id ?? '');
+
+    if (!($isAdmin || $isOper || $isOwner)) {
+        return response()->json([
+            'success' => false,
+            'message' => 'Forbidden',
+        ], 403);
+    }
+
+    // 0) Kumpulkan semua UUID file dari row (gabung semua FILE_FIELDS)
+    $fileUuids = [];
+    foreach (self::FILE_FIELDS as $f) {
+        $uuids = $row->getAttribute($f);
+        if (is_array($uuids) && !empty($uuids)) {
+            $fileUuids = array_merge($fileUuids, $uuids);
+        }
+    }
+    $fileUuids = array_values(array_unique(array_filter(array_map('strval', $fileUuids))));
+
+    // 1) Token usulan (opsional): kalau model ini punya relasi uuidUsulan/uuid/uuid_usulan
+    $tokens = [];
+    try {
+        $table = $row->getTable();
+
+        if (\Illuminate\Support\Facades\Schema::hasColumn($table, 'uuidUsulan')) {
+            $v = trim((string) ($row->uuidUsulan ?? ''));
+            if ($v !== '') $tokens[] = $v;
+        }
+        if (\Illuminate\Support\Facades\Schema::hasColumn($table, 'uuid_usulan')) {
+            $v = trim((string) ($row->uuid_usulan ?? ''));
+            if ($v !== '') $tokens[] = $v;
+        }
+        if (\Illuminate\Support\Facades\Schema::hasColumn($table, 'uuid')) {
+            $v = trim((string) ($row->uuid ?? ''));
+            if ($v !== '') $tokens[] = $v;
+        }
+    } catch (\Throwable $e) {
+        // ignore
+    }
+
+    // selalu tambahin primary key sebagai fallback token
+    $tokens[] = (string) $row->getKey();
+    $tokens   = array_values(array_unique(array_filter($tokens)));
+    $tokensLow = array_map('strtolower', $tokens);
+
+    // helper normalisasi uuidUsulan pembangunan: null|string(JSON)|string single|array -> array<string>
+    $toArray = function ($val): array {
+        if (is_null($val)) return [];
+        if (is_array($val)) {
+            return collect($val)->map(fn($v)=>trim((string)$v))->filter()->values()->all();
+        }
+        $s = trim((string)$val);
+        if ($s === '') return [];
+        if (str_starts_with($s, '[')) {
+            $arr = json_decode($s, true);
+            return is_array($arr)
+                ? collect($arr)->map(fn($v)=>trim((string)$v))->filter()->values()->all()
+                : [$s];
+        }
+        return [$s];
+    };
+
+    $result = [
+        'deleted_files'            => 0,
+        'deleted_perencanaan'      => 0,
+        'deleted_pengawasan'       => 0,
+        'updated_pembangunan_rows' => 0,
+        'deleted_pembangunan_rows' => 0,
+        'deleted_pembangunan_ids'  => [],
+    ];
+
+    \DB::transaction(function () use ($row, $fileUuids, $tokens, $tokensLow, $toArray, &$result) {
+
+        // 2) (Optional) bersihkan relasi jika memang tabel lain pakai uuidUsulan yang sama
+        try {
+            $result['deleted_perencanaan'] = \App\Models\Perencanaan::query()
+                ->where(function ($q) use ($tokens) {
+                    foreach ($tokens as $t) $q->orWhere('uuidUsulan', $t);
+                })
+                ->delete();
+        } catch (\Throwable $e) {
+            $result['deleted_perencanaan'] = 0;
+        }
+
+        try {
+            $result['deleted_pengawasan'] = \App\Models\Pengawasan::query()
+                ->where(function ($q) use ($tokens) {
+                    foreach ($tokens as $t) $q->orWhere('uuidUsulan', $t);
+                })
+                ->delete();
+        } catch (\Throwable $e) {
+            $result['deleted_pengawasan'] = 0;
+        }
+
+        // 3) Cabut token dari Pembangunan.uuidUsulan, dan hapus row pembangunan jika jadi kosong
+        try {
+            $rows = \App\Models\Pembangunan::query()
+                ->whereNotNull('uuidUsulan')
+                ->where(function ($q) use ($tokens) {
+                    foreach ($tokens as $t) {
+                        $q->orWhereJsonContains('uuidUsulan', $t)
+                          ->orWhere('uuidUsulan', $t)
+                          ->orWhere('uuidUsulan', 'like', '%"'.$t.'"%')
+                          ->orWhere('uuidUsulan', 'like', '%'.$t.'%');
+                    }
+                })
+                ->lockForUpdate()
+                ->get();
+
+            foreach ($rows as $b) {
+                $after = collect($toArray($b->uuidUsulan))
+                    ->map(fn($v)=>trim((string)$v))
+                    ->filter(fn($v)=>$v !== '')
+                    ->reject(fn($v)=>in_array(strtolower((string)$v), $tokensLow, true))
+                    ->values()
+                    ->unique()
+                    ->all();
+
+                if (empty($after)) {
+                    try {
+                        $id = (string) $b->id;
+                        $b->delete();
+                        $result['deleted_pembangunan_rows']++;
+                        $result['deleted_pembangunan_ids'][] = $id;
+                    } catch (\Throwable $e) {
+                        // fallback kalau delete gagal
+                        $b->uuidUsulan = [];
+                        $b->save();
+                        $result['updated_pembangunan_rows']++;
+                    }
+                    continue;
+                }
+
+                $b->uuidUsulan = $after;
+                $b->save();
+                $result['updated_pembangunan_rows']++;
+            }
+        } catch (\Throwable $e) {
+            // kalau tabel/model Pembangunan tidak relevan untuk modul ini, aman di-skip
+        }
+
+        // 4) Hapus row utama
+        $row->delete();
+    });
+
+    // 5) Hapus file FINAL (di luar transaksi DB)
+    if (!empty($fileUuids)) {
+        try {
+            $this->deleteFinalUploads($fileUuids);
+            // kalau deleteFinalUploads kamu menghapus file semuanya, anggap sebanyak uuid
+            $result['deleted_files'] = count($fileUuids);
+        } catch (\Throwable $e) {
+            // optional log
+        }
+    }
+
+    return response()->json([
+        'success' => true,
+        'message' => 'Data berhasil dihapus',
+        'result'  => $result,
+    ]);
+}
+
 
     // ================== HELPERS ==================
 

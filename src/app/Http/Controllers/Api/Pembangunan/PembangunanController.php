@@ -269,20 +269,18 @@ public function index(Request $request)
 public function store(Request $request)
 {
     $auth = $request->user();
-if (!$auth) {
-    return response()->json(['success' => false, 'message' => 'Unauthenticated'], 401);
-}
+    if (!$auth) {
+        return response()->json(['success' => false, 'message' => 'Unauthenticated'], 401);
+    }
 
-$role = strtolower((string) ($auth->role ?? ''));
+    $role = strtolower((string) ($auth->role ?? ''));
+    if (!in_array($role, ['admin', 'operator'], true)) {
+        return response()->json(['success' => false, 'message' => 'Unauthorized.'], 403);
+    }
 
-if (!in_array($role, ['admin', 'operator'], true)) {
-    return response()->json(['success' => false, 'message' => 'Unauthorized.'], 403);
-}
-
-    // Hanya SATU uuidUsulan (string uuid), bukan array
-    $rules = [
+    $validated = $request->validate([
         'uuidUsulan'          => ['required','uuid'],
-        'nomorSPK'            => ['required','string','max:150'], // tetap required karena kolom DB tidak nullable
+        'nomorSPK'            => ['required','string','max:150'],
         'tanggalSPK'          => ['sometimes','nullable','date'],
         'nilaiKontrak'        => ['sometimes','nullable','string','max:100'],
         'kontraktorPelaksana' => ['sometimes','nullable','string','max:255'],
@@ -290,20 +288,12 @@ if (!in_array($role, ['admin', 'operator'], true)) {
         'tanggalSelesai'      => ['sometimes','nullable','date'],
         'jangkaWaktu'         => ['sometimes','nullable','string','max:100'],
         'pengawasLapangan'    => ['sometimes','nullable','string','max:255'],
-    ];
-    $validated = $request->validate($rules, [], ['nomorSPK' => 'nomor SPK']);
+    ], [], ['nomorSPK' => 'nomor SPK']);
 
-    // Tolak jika uuidUsulan sudah ada (harus unik per usulan)
-    if (Pembangunan::where('uuidUsulan', $validated['uuidUsulan'])->exists()) {
-        return response()->json([
-            'success'    => false,
-            'message'    => 'Pembangunan untuk uuidUsulan tersebut sudah ada. Tidak boleh input duplikat.',
-            'uuidUsulan' => $validated['uuidUsulan'],
-        ], 422);
-    }
+    $incoming = (string) $validated['uuidUsulan'];
 
     // Pastikan usulan tujuan ada
-    $usulan = $this->findUsulanByUuid($validated['uuidUsulan']);
+    $usulan = $this->findUsulanByUuid($incoming);
     if (!$usulan) {
         return response()->json([
             'success' => false,
@@ -311,11 +301,73 @@ if (!in_array($role, ['admin', 'operator'], true)) {
         ], 422);
     }
 
-    // Buat + naikkan status usulan -> 6 (clear pesan)
-    $row = null;
-    DB::transaction(function () use (&$row, $validated, $usulan) {
-        $row = Pembangunan::create($validated);
+    // Helper normalisasi uuidUsulan row (array / json string / single string) -> array<string>
+    $toArray = function ($val): array {
+        if (is_null($val)) return [];
+        if (is_array($val)) {
+            return collect($val)->map(fn($v)=>trim((string)$v))->filter()->values()->all();
+        }
+        $s = trim((string)$val);
+        if ($s === '') return [];
+        if (str_starts_with($s, '[')) {
+            $arr = json_decode($s, true);
+            if (json_last_error() === JSON_ERROR_NONE && is_array($arr)) {
+                return collect($arr)->map(fn($v)=>trim((string)$v))->filter()->values()->all();
+            }
+        }
+        return [$s];
+    };
 
+    $moved = [
+        'updated_rows' => [],
+        'deleted_rows' => [],
+    ];
+
+    $row = null;
+
+    DB::transaction(function () use (&$row, $validated, $incoming, $usulan, $toArray, &$moved) {
+
+        // 1) Ambil semua row pembangunan lain yang mengandung uuidUsulan ini (lock untuk aman)
+        $others = Pembangunan::query()
+            ->whereNotNull('uuidUsulan')
+            ->where(function ($q) use ($incoming) {
+                $q->whereJsonContains('uuidUsulan', $incoming)
+                  ->orWhere('uuidUsulan', $incoming)                   // legacy single string
+                  ->orWhere('uuidUsulan', 'like', '%"'.$incoming.'"%'); // text berisi JSON
+            })
+            ->lockForUpdate()
+            ->get();
+
+        // 2) Cabut uuidUsulan dari row lama; kalau kosong -> delete
+        foreach ($others as $o) {
+            $current = $toArray($o->uuidUsulan);
+
+            $after = collect($current)
+                ->map(fn($v) => trim((string)$v))
+                ->filter(fn($v) => $v !== '')
+                ->reject(fn($v) => $v === $incoming)
+                ->unique()
+                ->values()
+                ->all();
+
+            if (empty($after)) {
+                $moved['deleted_rows'][] = (string) $o->id;
+                $o->delete();
+                continue;
+            }
+
+            $o->uuidUsulan = $after; // tetap array
+            $o->save();
+            $moved['updated_rows'][] = (string) $o->id;
+        }
+
+        // 3) Buat row baru (uuidUsulan wajib array)
+        $payload = $validated;
+        $payload['uuidUsulan'] = [$incoming];
+
+        $row = Pembangunan::create($payload);
+
+        // 4) Naikkan status usulan -> 6 & clear pesan (kalau kolom ada)
         $table = $usulan->getTable();
         if (Schema::hasColumn($table, 'status_verifikasi_usulan')) {
             $usulan->status_verifikasi_usulan = 6;
@@ -328,8 +380,12 @@ if (!in_array($role, ['admin', 'operator'], true)) {
 
     return response()->json([
         'success' => true,
-        'message' => 'Data pembangunan berhasil dibuat. Status usulan dinaikkan ke 6.',
+        'message' => 'Data pembangunan berhasil dibuat. Jika uuidUsulan sudah ada di pembangunan lain, UUID sudah dipindahkan; row lama yang kosong otomatis dihapus.',
         'data'    => $row,
+        'moved'   => [
+            'updated_rows' => array_values(array_unique($moved['updated_rows'])),
+            'deleted_rows' => array_values(array_unique($moved['deleted_rows'])),
+        ],
     ], 201);
 }
 
@@ -378,56 +434,62 @@ public function storeCloneFromExisting(Request $request)
     $toArray = function ($val): array {
         if (is_null($val)) return [];
         if (is_array($val)) {
-            return collect($val)->map(fn($v)=>(string)$v)->filter()->values()->all();
+            return collect($val)->map(fn($v)=>trim((string)$v))->filter()->values()->all();
         }
         $s = trim((string)$val);
         if ($s === '') return [];
         if (str_starts_with($s, '[')) {
             $arr = json_decode($s, true);
             return is_array($arr)
-                ? collect($arr)->map(fn($v)=>(string)$v)->filter()->values()->all()
+                ? collect($arr)->map(fn($v)=>trim((string)$v))->filter()->values()->all()
                 : [$s];
         }
         return [$s];
     };
 
     $incoming = (string) $validated['uuidUsulan'];
-    $movedFrom = [];
+    $movedFrom = [
+        'updated_rows' => [],
+        'deleted_rows' => [],
+    ];
 
     \DB::transaction(function () use (&$row, $incoming, $toArray, &$movedFrom, $targetUsulan) {
         // Lock row target
         $row = \App\Models\Pembangunan::whereKey($row->getKey())->lockForUpdate()->first();
 
         // 1) Cari baris pembangunan LAIN yang mengandung uuidUsulan ini
-        //    - JSON (whereJsonContains)
-        //    - legacy single string (=)
-        //    - TEXT berisi JSON string (LIKE "%\"uuid\"%") dan fallback LIKE umum
         $others = \App\Models\Pembangunan::query()
             ->where('id', '!=', $row->getKey())
             ->whereNotNull('uuidUsulan')
             ->where(function($q) use ($incoming) {
-                // JSON native
                 $q->whereJsonContains('uuidUsulan', $incoming)
-                  // legacy single
-                  ->orWhere('uuidUsulan', $incoming)
-                  // TEXT yang berisi JSON array string
+                  ->orWhere('uuidUsulan', $incoming) // legacy single
                   ->orWhere('uuidUsulan', 'like', '%"'.$incoming.'"%')
-                  // fallback sangat longgar (antisipasi format custom)
                   ->orWhere('uuidUsulan', 'like', '%'.$incoming.'%');
             })
             ->lockForUpdate()
             ->get();
 
-        // 2) Hapus uuidUsulan dari baris-baris lain tsb (proses di PHP biar pasti)
+        // 2) Cabut uuidUsulan dari baris-baris lain tsb
         foreach ($others as $o) {
             $list = collect($toArray($o->uuidUsulan))
+                ->map(fn($v) => trim((string)$v))
+                ->filter(fn($v) => $v !== '')
                 ->reject(fn($v) => $v === $incoming)
+                ->unique()
                 ->values()
                 ->all();
 
-            $o->uuidUsulan = count($list) ? $list : null; // kosong -> null biar rapi
+            // === PERUBAHAN: kalau kosong -> DELETE row lama ===
+            if (empty($list)) {
+                $movedFrom['deleted_rows'][] = (string) $o->id;
+                $o->delete();
+                continue;
+            }
+
+            $o->uuidUsulan = $list; // tetap array
             $o->save();
-            $movedFrom[] = (string) $o->id;
+            $movedFrom['updated_rows'][] = (string) $o->id;
         }
 
         // 3) Tambahkan ke baris TARGET (unik)
@@ -451,37 +513,40 @@ public function storeCloneFromExisting(Request $request)
 
     return response()->json([
         'success' => true,
-        'message' => 'UUID usulan dipindahkan dari baris lain (jika ada) dan ditambahkan ke baris target. Status usulan dinaikkan ke 6.',
+        'message' => 'UUID usulan dipindahkan dari baris lain (jika ada) dan ditambahkan ke baris target. Jika baris lama jadi kosong, otomatis dihapus.',
         'data'    => [
             'uuidUsulan'      => $incoming,
             'uuidPembangunan' => (string) $row->id,
-            'moved_from_rows' => array_values(array_unique($movedFrom)),
-            'target_row'      => $row->fresh(), // pastikan casts di model
+            'moved'           => [
+                'updated_rows' => array_values(array_unique($movedFrom['updated_rows'])),
+                'deleted_rows' => array_values(array_unique($movedFrom['deleted_rows'])),
+            ],
+            'target_row'      => $row->fresh(),
         ],
     ], 201);
 }
 
-
 public function update(Request $request, string $id)
 {
-    // ==== Auth & Role Guard (ADMIN ONLY) ====
+    // ==== Auth & Role Guard (ADMIN / OPERATOR) ====
     $user = $request->user();
-if (!$user) {
-    return response()->json(['success' => false, 'message' => 'Unauthenticated'], 401);
-}
+    if (!$user) {
+        return response()->json(['success' => false, 'message' => 'Unauthenticated'], 401);
+    }
 
-$role = strtolower((string) ($user->role ?? ''));
-if (!in_array($role, ['admin', 'operator'], true)) {
-    return response()->json(['success' => false, 'message' => 'Unauthorized'], 403);
-}
-// =============================================
+    $role = strtolower((string) ($user->role ?? ''));
+    if (!in_array($role, ['admin', 'operator'], true)) {
+        return response()->json(['success' => false, 'message' => 'Unauthorized'], 403);
+    }
+    // =============================================
 
-$row = Pembangunan::find($id);
-if (!$row) {
-    return response()->json(['success' => false, 'message' => 'Data tidak ditemukan'], 404);
-}
+    // Pastikan row ada (cek cepat)
+    $exists = Pembangunan::whereKey($id)->exists();
+    if (!$exists) {
+        return response()->json(['success' => false, 'message' => 'Data tidak ditemukan'], 404);
+    }
 
-    // Normalisasi input uuidUsulan (boleh kirim string JSON atau "a,b,c")
+    // ==== Normalisasi input uuidUsulan (boleh JSON string / "a,b,c" / array) ====
     if ($request->has('uuidUsulan')) {
         $in = $request->input('uuidUsulan');
 
@@ -496,7 +561,7 @@ if (!$row) {
         }
     }
 
-    // VALIDASI (tanpa field 'unit', dan TIDAK boleh update user_id)
+    // ==== Validasi (tanpa unit & user_id) ====
     $validated = $request->validate([
         'uuidUsulan'           => ['sometimes','array','min:1'],
         'uuidUsulan.*'         => ['uuid'],
@@ -513,37 +578,128 @@ if (!$row) {
         'nomorSPK' => 'nomor SPK',
     ]);
 
-    // Pastikan 'unit' diabaikan jika dikirim
-    if (array_key_exists('unit', $validated)) {
-        unset($validated['unit']);
+    // Helper: bersihkan uuid list (trim, buang kosong, unique)
+    $cleanUuidList = function ($val): array {
+        if (is_null($val)) return [];
+        if (is_array($val)) {
+            return collect($val)
+                ->map(fn($v) => trim((string)$v))
+                ->filter(fn($v) => $v !== '')
+                ->unique()
+                ->values()
+                ->all();
+        }
+        // kalau string legacy
+        $s = trim((string)$val);
+        if ($s === '') return [];
+        if (str_starts_with($s, '[')) {
+            $arr = json_decode($s, true);
+            if (json_last_error() === JSON_ERROR_NONE && is_array($arr)) {
+                return collect($arr)
+                    ->map(fn($v) => trim((string)$v))
+                    ->filter(fn($v) => $v !== '')
+                    ->unique()
+                    ->values()
+                    ->all();
+            }
+        }
+        return [$s];
+    };
+
+    // incoming uuidUsulan (kalau dikirim)
+    $incomingUuids = array_key_exists('uuidUsulan', $validated)
+        ? $cleanUuidList($validated['uuidUsulan'])
+        : null; // null => uuidUsulan tidak diubah
+
+    if (is_array($incomingUuids) && empty($incomingUuids)) {
+        return response()->json([
+            'success' => false,
+            'message' => 'uuidUsulan tidak boleh kosong.',
+        ], 422);
     }
 
-    $row->fill($validated);
-    $dirty = $row->getDirty();
+    $movedFrom = [
+        'updated_rows' => [],
+        'deleted_rows' => [],
+    ];
 
-    if (empty($dirty)) {
-        // Sanitasi output: sembunyikan user_id & unit
-        $data = $row->toArray();
-        unset($data['user_id'], $data['unit']);
+    DB::transaction(function () use ($id, $validated, $incomingUuids, $cleanUuidList, &$movedFrom) {
+        /** @var \App\Models\Pembangunan $target */
+        $target = Pembangunan::whereKey($id)->lockForUpdate()->first();
 
+        // === Kalau uuidUsulan dikirim: pindahkan dari row lain, lalu set ke row ini ===
+        if (is_array($incomingUuids)) {
+            // Lock dan ambil semua row lain yang mengandung salah satu UUID incoming
+            $others = Pembangunan::query()
+                ->where('id', '!=', $target->getKey())
+                ->whereNotNull('uuidUsulan')
+                ->where(function ($q) use ($incomingUuids) {
+                    foreach ($incomingUuids as $u) {
+                        $q->orWhereJsonContains('uuidUsulan', $u)
+                          ->orWhere('uuidUsulan', $u)                 // legacy single string
+                          ->orWhere('uuidUsulan', 'like', '%"'.$u.'"%'); // text berisi JSON
+                    }
+                })
+                ->lockForUpdate()
+                ->get();
+
+            foreach ($others as $o) {
+                $current = $cleanUuidList($o->uuidUsulan);
+                $after   = array_values(array_diff($current, $incomingUuids));
+
+                if (empty($after)) {
+                    // uuidUsulan jadi kosong -> DELETE row pembangunan tsb (ga kepakai)
+                    $movedFrom['deleted_rows'][] = (string) $o->id;
+                    $o->delete();
+                    continue;
+                }
+
+                $o->uuidUsulan = array_values(array_unique($after));
+                $o->save();
+                $movedFrom['updated_rows'][] = (string) $o->id;
+            }
+
+            // Set uuidUsulan target menjadi incoming (unik)
+            $target->uuidUsulan = $incomingUuids;
+        }
+
+        // === Update field lain (selain uuidUsulan) ===
+        $updateData = $validated;
+        unset($updateData['uuidUsulan']);
+
+        // extra safety: kalau ada yang nyelip
+        unset($updateData['unit'], $updateData['user_id']);
+
+        if (!empty($updateData)) {
+            $target->fill($updateData);
+        }
+
+        $target->save();
+    });
+
+    // Response: ambil data terbaru + sembunyikan user_id & unit
+    $fresh = Pembangunan::find($id);
+    if (!$fresh) {
+        // kalau target row terhapus (harusnya tidak), fallback
         return response()->json([
             'success' => true,
-            'message' => 'Tidak ada perubahan data',
-            'data'    => $data,
-            'changed' => [],
+            'message' => 'Update sukses.',
+            'data'    => null,
+            'moved'   => $movedFrom,
         ]);
     }
 
-    $row->save();
-
-    // Ambil data terbaru & sanitasi output
-    $fresh = $row->fresh()->toArray();
-    unset($fresh['user_id'], $fresh['unit']);
+    $out = $fresh->toArray();
+    unset($out['user_id'], $out['unit']);
 
     return response()->json([
         'success' => true,
-        'message' => 'Field berikut berhasil diperbarui: ' . implode(', ', array_keys($dirty)),
-        'data'    => $fresh,
+        'message' => 'Update sukses. uuidUsulan dipindahkan (dan row kosong dihapus) bila diperlukan.',
+        'data'    => $out,
+        'moved'   => [
+            'updated_rows' => array_values(array_unique($movedFrom['updated_rows'])),
+            'deleted_rows' => array_values(array_unique($movedFrom['deleted_rows'])),
+        ],
     ]);
 }
 

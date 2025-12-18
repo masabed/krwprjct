@@ -499,67 +499,137 @@ class PSUUsulanFisikTPUController extends Controller
 
     /** DELETE /api/psu/usulan/tpu/{uuid} */
     public function destroy(string $uuid)
-    {
-        /** @var \App\Models\PSUUsulanFisikTPU|null $row */
-        $row = \App\Models\PSUUsulanFisikTPU::where('uuid', $uuid)->first();
-        if (!$row) {
-            return response()->json(['success' => false, 'message' => 'Data tidak ditemukan'], 404);
+{
+    // 0) Auth
+    $auth = auth()->user();
+    if (!$auth) {
+        return response()->json(['success' => false, 'message' => 'Unauthenticated'], 401);
+    }
+
+    /** @var \App\Models\PSUUsulanFisikTPU|null $row */
+    $row = \App\Models\PSUUsulanFisikTPU::where('uuid', $uuid)->first();
+    if (!$row) {
+        return response()->json(['success' => false, 'message' => 'Data tidak ditemukan'], 404);
+    }
+
+    // 1) Access control: admin/admin_bidang/operator/owner
+    $role     = strtolower((string) ($auth->role ?? ''));
+    $isAdmin  = in_array($role, ['admin', 'admin_bidang'], true);
+    $isOper   = ($role === 'operator');
+    $isOwner  = (string) ($row->user_id ?? '') === (string) ($auth->id ?? '');
+
+    if (!($isAdmin || $isOper || $isOwner)) {
+        return response()->json([
+            'success' => false,
+            'message' => 'Unauthorized. Anda Tidak Berwenang.',
+        ], 403);
+    }
+
+    // helper normalisasi: null|string(JSON)|string single|array -> array<string>
+    $toArray = function ($val): array {
+        if (is_null($val)) return [];
+        if (is_array($val)) {
+            return collect($val)->map(fn($v)=>trim((string)$v))->filter()->values()->all();
+        }
+        $s = trim((string)$val);
+        if ($s === '') return [];
+        if (str_starts_with($s, '[')) {
+            $arr = json_decode($s, true);
+            return is_array($arr)
+                ? collect($arr)->map(fn($v)=>trim((string)$v))->filter()->values()->all()
+                : [$s];
+        }
+        return [$s];
+    };
+
+    // token relasi: uuid + PK fallback
+    $usulanUuid = (string) ($row->uuid ?? $uuid);
+    $usulanId   = (string) $row->getKey();
+    $tokens     = array_values(array_unique(array_filter([$usulanUuid, $usulanId])));
+    $tokensLow  = array_map('strtolower', $tokens);
+
+    $result = [
+        'deleted_perencanaan'      => 0,
+        'deleted_pengawasan'       => 0,
+        'updated_pembangunan_rows' => 0,
+        'deleted_pembangunan_rows' => 0,
+        'deleted_pembangunan_ids'  => [],
+    ];
+
+    \DB::transaction(function () use ($row, $tokens, $tokensLow, $toArray, &$result) {
+
+        // 2) Hapus Perencanaan terkait
+        $result['deleted_perencanaan'] = \App\Models\Perencanaan::query()
+            ->where(function ($q) use ($tokens) {
+                foreach ($tokens as $t) $q->orWhere('uuidUsulan', $t);
+            })
+            ->delete();
+
+        // 3) Hapus Pengawasan terkait
+        try {
+            $result['deleted_pengawasan'] = \App\Models\Pengawasan::query()
+                ->where(function ($q) use ($tokens) {
+                    foreach ($tokens as $t) $q->orWhere('uuidUsulan', $t);
+                })
+                ->delete();
+        } catch (\Throwable $e) {
+            $result['deleted_pengawasan'] = 0;
         }
 
-        \DB::transaction(function () use ($uuid, $row) {
-            // 1) Hapus semua Perencanaan yang menempel ke usulan ini
-            \App\Models\Perencanaan::where('uuidUsulan', $uuid)->delete();
-
-            // 2) Cabut UUID usulan ini dari semua baris Pembangunan terkait
-            $buildRows = \App\Models\Pembangunan::query()
-                ->where('uuidUsulan', $uuid)                 // legacy string
-                ->orWhereJsonContains('uuidUsulan', $uuid)   // JSON array
-                ->get();
-
-            foreach ($buildRows as $b) {
-                $raw = $b->getAttribute('uuidUsulan');
-
-                // Normalisasi ke array (tahan legacy & JSON-string)
-                if (is_array($raw)) {
-                    $arr = $raw;
-                } elseif (is_string($raw)) {
-                    $t = trim($raw);
-                    if ($t !== '' && (function_exists('str_starts_with') ? str_starts_with($t, '[') : $t[0] === '[')) {
-                        $dec = json_decode($t, true);
-                        $arr = is_array($dec) ? $dec : [];
-                    } elseif ($t !== '') {
-                        $arr = [$t];
-                    } else {
-                        $arr = [];
-                    }
-                } else {
-                    $arr = [];
+        // 4) Cabut token dari semua row Pembangunan yang memuat usulan ini
+        $rows = \App\Models\Pembangunan::query()
+            ->whereNotNull('uuidUsulan')
+            ->where(function ($q) use ($tokens) {
+                foreach ($tokens as $t) {
+                    $q->orWhereJsonContains('uuidUsulan', $t)
+                      ->orWhere('uuidUsulan', $t)                   // legacy single
+                      ->orWhere('uuidUsulan', 'like', '%"'.$t.'"%') // json string
+                      ->orWhere('uuidUsulan', 'like', '%'.$t.'%');  // fallback longgar
                 }
+            })
+            ->lockForUpdate()
+            ->get();
 
-                // Buang $uuid dari list
-                $after = collect($arr)
-                    ->map(fn($v) => trim((string)$v))
-                    ->filter(fn($v) => $v !== '' && $v !== $uuid)
-                    ->values()
-                    ->all();
+        foreach ($rows as $b) {
+            $after = collect($toArray($b->uuidUsulan))
+                ->map(fn($v)=>trim((string)$v))
+                ->filter(fn($v)=>$v !== '')
+                ->reject(fn($v)=>in_array(strtolower((string)$v), $tokensLow, true))
+                ->values()
+                ->unique()
+                ->all();
 
-                // Simpan kembali (kosong → null biar rapi)
-                $b->uuidUsulan = $after ?: null;
-                $b->save();
+            // kosong -> hapus row pembangunan (kalau gagal, fallback set [])
+            if (empty($after)) {
+                try {
+                    $id = (string) $b->id;
+                    $b->delete();
+
+                    $result['deleted_pembangunan_rows']++;
+                    $result['deleted_pembangunan_ids'][] = $id;
+                } catch (\Throwable $e) {
+                    $b->uuidUsulan = [];
+                    $b->save();
+                    $result['updated_pembangunan_rows']++;
+                }
+                continue;
             }
 
-            // (Opsional) kalau ingin sekalian bersihkan catatan pengawasan:
-            // \App\Models\Pengawasan::where('uuidUsulan', $uuid)->delete();
+            $b->uuidUsulan = $after;
+            $b->save();
+            $result['updated_pembangunan_rows']++;
+        }
 
-            // 3) Hapus usulan utama
-            $row->delete();
-        });
+        // 5) Hapus usulan utama
+        $row->delete();
+    });
 
-        return response()->json([
-            'success' => true,
-            'message' => 'Data berhasil dihapus; perencanaan dihapus dan UUID dicabut dari pembangunan.',
-        ]);
-    }
+    return response()->json([
+        'success' => true,
+        'message' => 'Data berhasil dihapus; perencanaan & pengawasan dibersihkan, UUID dicabut dari pembangunan, dan pembangunan kosong ikut terhapus.',
+        'result'  => $result,
+    ]);
+}
 
     // ================= Helpers =================
 

@@ -22,10 +22,14 @@ class User extends Authenticatable implements JWTSubject
         'email',
         'password',
         'role',
-        'noHP',  
-         'kecamatan',
-    'kelurahan',    // nomor HP user
-        'avatar_path',  // path file avatar di disk public
+        'noHP',
+        'kecamatan',
+        'kelurahan',
+        'avatar_path',
+
+        // login tracking
+        'last_login_at',
+        'previous_login_at',
     ];
 
     protected $hidden = [
@@ -34,8 +38,12 @@ class User extends Authenticatable implements JWTSubject
     ];
 
     protected $casts = [
-        'email_verified_at' => 'datetime',
-        'password'          => 'hashed',
+        'email_verified_at'   => 'datetime',
+        'password'            => 'hashed',
+
+        // login tracking
+        'last_login_at'       => 'datetime',
+        'previous_login_at'   => 'datetime',
     ];
 
     protected static function booted(): void
@@ -45,6 +53,11 @@ class User extends Authenticatable implements JWTSubject
                 $user->id = (string) Str::uuid();
             }
         });
+
+        // Optional: kalau mau avatar otomatis terhapus saat user dihapus
+        // static::deleting(function ($user) {
+        //     $user->deleteAvatarFile();
+        // });
     }
 
     // ===== JWT =====

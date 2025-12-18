@@ -6,26 +6,12 @@ use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Schema;
+use Illuminate\Database\Eloquent\Builder;
 
-// MODELS
-use App\Models\UsulanFisikBSL;
-use App\Models\PSUUsulanFisikPerumahan;
-use App\Models\PSUUsulanFisikTPU;
-use App\Models\PSUUsulanFisikPJL;
-use App\Models\PsuSerahTerima;
-use App\Models\TpuSerahTerima;
-use App\Models\SAPDLahanMasyarakat;
-use App\Models\UsulanSAPDSIndividual;
-use App\Models\UsulanSAPDSFasilitasUmum;
-use App\Models\Permukiman;
-use App\Models\Rutilahu;
+use App\Models\UsulanSummary;
 
 class DashboardController extends Controller
 {
-    /**
-     * Label status_verifikasi_usulan 0–7 (versi baru)
-     */
     private const STATUS_LABELS = [
         0 => 'Usulan',
         1 => 'Ditolak',
@@ -37,28 +23,44 @@ class DashboardController extends Controller
         7 => 'Selesai',
     ];
 
-    /**
-     * GET /api/dashboard
-     * Ringkasan angka untuk dashboard.
-     */
     public function index(Request $request): JsonResponse
     {
-        // ================== DAFTAR TABEL & MODEL ==================
-        $tables = [
-            'usulan_fisik_bsl'              => UsulanFisikBSL::class,
-            'psu_usulan_fisik_perumahans'   => PSUUsulanFisikPerumahan::class,
-            'psu_usulan_fisik_tpus'         => PSUUsulanFisikTPU::class,
-            'psu_usulan_fisik_pjls'         => PSUUsulanFisikPJL::class,
-            'psu_serah_terimas'             => PsuSerahTerima::class,
-            'tpu_serah_terimas'             => TpuSerahTerima::class,
-            'sapd_lahan_masyarakats'        => SAPDLahanMasyarakat::class,
-            'usulan_sapds_individuals'      => UsulanSAPDSIndividual::class,
-            'usulan_sapds_fasilitas_umums'  => UsulanSAPDSFasilitasUmum::class,
-            'permukimans'                   => Permukiman::class,
-            'rutilahus'                     => Rutilahu::class,
+        $auth = $request->user();
+        if (!$auth) {
+            return response()->json(['success' => false, 'message' => 'Unauthenticated'], 401);
+        }
+
+        $role   = strtolower((string) ($auth->role ?? ''));
+        $isPriv = in_array($role, ['admin', 'operator', 'pengawas'], true);
+
+        /**
+         * Mapping key dashboard lama -> form di usulan_summaries
+         * Pastikan string form ini SAMA dengan FORM_MAP di observer.
+         */
+        $tableToForm = [
+            'usulan_fisik_bsl'             => 'psu_bsl',
+            'psu_usulan_fisik_perumahans'  => 'psu_perumahan',
+            'psu_usulan_fisik_tpus'        => 'psu_tpu',
+            'psu_usulan_fisik_pjls'        => 'psu_pjl',
+
+            // ✅ serah-terima (pastikan observer isi ini)
+            'psu_serah_terimas'            => 'psu_serah_terima',
+            'tpu_serah_terimas'            => 'tpu_serah_terima',
+
+            'sapd_lahan_masyarakats'       => 'sapd_lahan',
+            'usulan_sapds_individuals'     => 'sapd_individual',
+            'usulan_sapds_fasilitas_umums' => 'sapd_fasum',
+
+            'permukimans'                  => 'permukiman',
+            'rutilahus'                    => 'rutilahu',
         ];
 
-        // Kelompok logis untuk summary & status grouped
+        // Lookup cepat: form -> tableKey
+        $formToTableKey = [];
+        foreach ($tableToForm as $tableKey => $form) {
+            if (!empty($form)) $formToTableKey[$form] = $tableKey;
+        }
+
         $groupMap = [
             'psu_usulan' => [
                 'usulan_fisik_bsl',
@@ -83,14 +85,22 @@ class DashboardController extends Controller
             ],
         ];
 
-        // ================== TOTAL PER TABEL ==================
+        $forms = collect($tableToForm)
+            ->filter(fn ($v) => !empty($v))
+            ->values()
+            ->unique()
+            ->all();
+
+        // ================== TOTAL PER FORM ==================
+        $countsByForm = $this->scopedSummaryQuery($auth, $isPriv)
+            ->select('form', DB::raw('COUNT(*) as total'))
+            ->whereIn('form', $forms)
+            ->groupBy('form')
+            ->pluck('total', 'form');
+
         $counts = [];
-        foreach ($tables as $key => $modelClass) {
-            if (!class_exists($modelClass)) {
-                $counts[$key] = 0;
-                continue;
-            }
-            $counts[$key] = (int) $modelClass::query()->count();
+        foreach ($tableToForm as $tableKey => $form) {
+            $counts[$tableKey] = $form ? (int) ($countsByForm[$form] ?? 0) : 0;
         }
 
         // ================== SUMMARY GLOBAL ==================
@@ -103,13 +113,38 @@ class DashboardController extends Controller
             'total_semua'        => array_sum($counts),
         ];
 
-        // ================== STATUS_VERIFIKASI PER TABEL (RAW COUNTS) ==================
+        // ================== STATUS PER FORM ==================
+        $statusRows = $this->scopedSummaryQuery($auth, $isPriv)
+            ->select(
+                'form',
+                DB::raw('COALESCE(status_verifikasi_usulan,0) as status'),
+                DB::raw('COUNT(*) as total')
+            )
+            ->whereIn('form', $forms)
+            ->whereRaw('COALESCE(status_verifikasi_usulan,0) BETWEEN 0 AND 7')
+            ->groupBy('form')
+            ->groupByRaw('COALESCE(status_verifikasi_usulan,0)')
+            ->get();
+
         $statusPerTableCounts = [];
-        foreach ($tables as $key => $modelClass) {
-            $statusPerTableCounts[$key] = $this->countStatusForModel($modelClass); // [0..7 => n]
+        foreach ($tableToForm as $tableKey => $_form) {
+            $statusPerTableCounts[$tableKey] = array_fill(0, 8, 0);
         }
 
-        // ================== STATUS_VERIFIKASI GROUPED (RAW COUNTS) ==================
+        foreach ($statusRows as $r) {
+            $form   = (string) $r->form;
+            $status = (int) $r->status;
+            $total  = (int) $r->total;
+
+            if ($status < 0 || $status > 7) continue;
+
+            $tableKey = $formToTableKey[$form] ?? null;
+            if (!$tableKey) continue;
+
+            $statusPerTableCounts[$tableKey][$status] = $total;
+        }
+
+        // ================== STATUS GROUPED ==================
         $groupedStatusCounts = [
             'psu_usulan'   => array_fill(0, 8, 0),
             'sapd'         => array_fill(0, 8, 0),
@@ -129,10 +164,9 @@ class DashboardController extends Controller
             }
         }
 
-        // ================== KONVERSI RAW COUNTS → ADA LABEL (per_table & grouped) ==================
         $statusPerTable = [];
-        foreach ($statusPerTableCounts as $key => $countsArr) {
-            $statusPerTable[$key] = $this->wrapStatusCounts($countsArr);
+        foreach ($statusPerTableCounts as $tableKey => $countsArr) {
+            $statusPerTable[$tableKey] = $this->wrapStatusCounts($countsArr);
         }
 
         $groupedStatus = [];
@@ -140,43 +174,76 @@ class DashboardController extends Controller
             $groupedStatus[$groupName] = $this->wrapStatusCounts($countsArr);
         }
 
-        // ================== HITUNG PER KECAMATAN (TOTAL PER TABEL) ==================
+        // ================== PER KECAMATAN PER FORM ==================
+        $kecRows = $this->scopedSummaryQuery($auth, $isPriv)
+            ->select('form', 'kecamatan', DB::raw('COUNT(*) as total'))
+            ->whereIn('form', $forms)
+            ->whereNotNull('kecamatan')
+            ->whereRaw("TRIM(kecamatan) <> ''")
+            ->groupBy('form', 'kecamatan')
+            ->orderBy('kecamatan')
+            ->get();
+
         $kecamatanPerTable = [];
-        foreach ($tables as $key => $modelClass) {
-            $kecamatanPerTable[$key] = $this->countByKecamatanForModel($modelClass);
+        foreach ($tableToForm as $tableKey => $_form) {
+            $kecamatanPerTable[$tableKey] = [];
         }
 
-        // ================== SUMMARY KECAMATAN + STATUS (RAW COUNTS) ==================
-        $kecamatanStatusSummaryCounts = []; // ['Nama Kec' => ['kecamatan'=>.., 'per_status'=>[0..7], 'total'=>N]]
+        foreach ($kecRows as $r) {
+            $form = (string) $r->form;
+            $kec  = (string) $r->kecamatan;
+            $tot  = (int) $r->total;
 
-        foreach ($tables as $key => $modelClass) {
-            $perModel = $this->countKecamatanStatusForModel($modelClass); // array of ['kecamatan','per_status'=>[0..7]]
+            $tableKey = $formToTableKey[$form] ?? null;
+            if (!$tableKey) continue;
 
-            foreach ($perModel as $row) {
-                $kec = (string) ($row['kecamatan'] ?? '');
-                if ($kec === '') continue;
+            $kecamatanPerTable[$tableKey][] = [
+                'kecamatan' => $kec,
+                'total'     => $tot,
+            ];
+        }
 
-                if (!isset($kecamatanStatusSummaryCounts[$kec])) {
-                    $kecamatanStatusSummaryCounts[$kec] = [
-                        'kecamatan'  => $kec,
-                        'per_status' => array_fill(0, 8, 0),
-                        'total'      => 0,
-                    ];
-                }
+        // ================== SUMMARY KECAMATAN + STATUS (LINTAS FORM) ==================
+        $kecStatusRows = $this->scopedSummaryQuery($auth, $isPriv)
+            ->select(
+                'kecamatan',
+                DB::raw('COALESCE(status_verifikasi_usulan,0) as status'),
+                DB::raw('COUNT(*) as total')
+            )
+            ->whereIn('form', $forms)
+            ->whereNotNull('kecamatan')
+            ->whereRaw("TRIM(kecamatan) <> ''")
+            ->whereRaw('COALESCE(status_verifikasi_usulan,0) BETWEEN 0 AND 7')
+            ->groupBy('kecamatan')
+            ->groupByRaw('COALESCE(status_verifikasi_usulan,0)')
+            ->get();
 
-                for ($s = 0; $s < 8; $s++) {
-                    $val = (int) ($row['per_status'][$s] ?? 0);
-                    $kecamatanStatusSummaryCounts[$kec]['per_status'][$s] += $val;
-                    $kecamatanStatusSummaryCounts[$kec]['total']          += $val;
-                }
+        $kecamatanStatusSummaryCounts = [];
+
+        foreach ($kecStatusRows as $r) {
+            $kec    = (string) $r->kecamatan;
+            $status = (int) $r->status;
+            $tot    = (int) $r->total;
+
+            if ($kec === '' || $status < 0 || $status > 7) continue;
+
+            $key = strtolower($kec);
+            if (!isset($kecamatanStatusSummaryCounts[$key])) {
+                $kecamatanStatusSummaryCounts[$key] = [
+                    'kecamatan'  => $kec,
+                    'per_status' => array_fill(0, 8, 0),
+                    'total'      => 0,
+                ];
             }
+
+            $kecamatanStatusSummaryCounts[$key]['per_status'][$status] += $tot;
+            $kecamatanStatusSummaryCounts[$key]['total']               += $tot;
         }
 
         ksort($kecamatanStatusSummaryCounts);
 
-        // KONVERSI kecamatan summary → embed label di setiap status
         $kecamatanStatusSummary = [];
-        foreach ($kecamatanStatusSummaryCounts as $kec => $row) {
+        foreach ($kecamatanStatusSummaryCounts as $row) {
             $kecamatanStatusSummary[] = [
                 'kecamatan'  => $row['kecamatan'],
                 'total'      => (int) $row['total'],
@@ -184,10 +251,108 @@ class DashboardController extends Controller
             ];
         }
 
+        // ================== PER KECAMATAN+KELURAHAN PER FORM ==================
+        $kelLabelExpr = "COALESCE(NULLIF(TRIM(kelurahan), ''), '-')";
+
+        $kelRows = $this->scopedSummaryQuery($auth, $isPriv)
+            ->select(
+                'form',
+                'kecamatan',
+                DB::raw("$kelLabelExpr as kelurahan"),
+                DB::raw('COUNT(*) as total')
+            )
+            ->whereIn('form', $forms)
+            ->whereNotNull('kecamatan')
+            ->whereRaw("TRIM(kecamatan) <> ''")
+            ->groupBy('form', 'kecamatan')
+            ->groupByRaw($kelLabelExpr)
+            ->orderBy('kecamatan')
+            ->orderByRaw($kelLabelExpr)
+            ->get();
+
+        $kelurahanPerTable = [];
+        foreach ($tableToForm as $tableKey => $_form) {
+            $kelurahanPerTable[$tableKey] = [];
+        }
+
+        foreach ($kelRows as $r) {
+            $form = (string) $r->form;
+            $kec  = (string) $r->kecamatan;
+            $kel  = (string) $r->kelurahan; // '-' jika kosong
+            $tot  = (int) $r->total;
+
+            $tableKey = $formToTableKey[$form] ?? null;
+            if (!$tableKey) continue;
+
+            $kelurahanPerTable[$tableKey][] = [
+                'kecamatan' => $kec,
+                'kelurahan' => $kel,
+                'total'     => $tot,
+            ];
+        }
+
+        // ================== SUMMARY KECAMATAN+KELURAHAN + STATUS (LINTAS FORM) ==================
+        $kelStatusRows = $this->scopedSummaryQuery($auth, $isPriv)
+            ->select(
+                'kecamatan',
+                DB::raw("$kelLabelExpr as kelurahan"),
+                DB::raw('COALESCE(status_verifikasi_usulan,0) as status'),
+                DB::raw('COUNT(*) as total')
+            )
+            ->whereIn('form', $forms)
+            ->whereNotNull('kecamatan')
+            ->whereRaw("TRIM(kecamatan) <> ''")
+            ->whereRaw('COALESCE(status_verifikasi_usulan,0) BETWEEN 0 AND 7')
+            ->groupBy('kecamatan')
+            ->groupByRaw($kelLabelExpr)
+            ->groupByRaw('COALESCE(status_verifikasi_usulan,0)')
+            ->get();
+
+        $kelurahanStatusSummaryCounts = []; // key = "kec||kel"
+
+        foreach ($kelStatusRows as $r) {
+            $kec    = (string) $r->kecamatan;
+            $kel    = (string) $r->kelurahan;
+            $status = (int) $r->status;
+            $tot    = (int) $r->total;
+
+            if ($kec === '' || $status < 0 || $status > 7) continue;
+
+            $key = strtolower($kec . '||' . $kel);
+            if (!isset($kelurahanStatusSummaryCounts[$key])) {
+                $kelurahanStatusSummaryCounts[$key] = [
+                    'kecamatan'  => $kec,
+                    'kelurahan'  => $kel,
+                    'per_status' => array_fill(0, 8, 0),
+                    'total'      => 0,
+                ];
+            }
+
+            $kelurahanStatusSummaryCounts[$key]['per_status'][$status] += $tot;
+            $kelurahanStatusSummaryCounts[$key]['total']               += $tot;
+        }
+
+        $kelurahanStatusSummary = array_values($kelurahanStatusSummaryCounts);
+        usort($kelurahanStatusSummary, function ($a, $b) {
+            $c = strcasecmp($a['kecamatan'], $b['kecamatan']);
+            if ($c !== 0) return $c;
+            return strcasecmp($a['kelurahan'], $b['kelurahan']);
+        });
+
+        $kelurahanStatusSummary = array_map(function ($row) {
+            return [
+                'kecamatan'  => $row['kecamatan'],
+                'kelurahan'  => $row['kelurahan'],
+                'total'      => (int) $row['total'],
+                'per_status' => $this->wrapStatusCounts($row['per_status']),
+            ];
+        }, $kelurahanStatusSummary);
+
+        // ================== RESPONSE ==================
         return response()->json([
             'success' => true,
             'data'    => [
-                // total record per tabel
+                // total record per tabel (key lama tetap)
                 'usulan_fisik_bsl'             => $counts['usulan_fisik_bsl'],
                 'psu_usulan_fisik_perumahans'  => $counts['psu_usulan_fisik_perumahans'],
                 'psu_usulan_fisik_tpus'        => $counts['psu_usulan_fisik_tpus'],
@@ -200,88 +365,75 @@ class DashboardController extends Controller
                 'permukimans'                  => $counts['permukimans'],
                 'rutilahus'                    => $counts['rutilahus'],
 
-                // summary global
                 'summary' => $summary,
 
-                // distribusi status (sudah ada label di tiap elemen)
                 'status_verifikasi' => [
-                    'per_table' => $statusPerTable,  // per tabel: [ {status,label,total}, ... ]
-                    'grouped'   => $groupedStatus,   // per group : [ {status,label,total}, ... ]
+                    'per_table' => $statusPerTable,
+                    'grouped'   => $groupedStatus,
                 ],
 
-                // distribusi per kecamatan
                 'kecamatan' => [
-                    // per tabel: [ [kecamatan,total], ... ]
                     'per_table' => $kecamatanPerTable,
-
-                    // summary lintas semua tabel:
-                    //   kecamatan A:
-                    //      total      = semua record di kec A
-                    //      per_status = array of {status,label,total}
                     'summary'   => $kecamatanStatusSummary,
+                ],
+
+                // ✅ tambahan sampai kelurahan
+                'kelurahan' => [
+                    'per_table' => $kelurahanPerTable,     // list [kec, kel, total] per tableKey
+                    'summary'   => $kelurahanStatusSummary, // lintas semua form
                 ],
             ],
         ]);
     }
 
-    // =====================================================================
-    // HELPERS
-    // =====================================================================
-
     /**
-     * Menjumlahkan beberapa key dari array $counts.
+     * Query UsulanSummary yang sudah diberi scope akses kontrol.
+     *
+     * Rules:
+     * 1-3) admin/operator/pengawas => semua
+     * 4) user: punya kec, kel null => seluruh kecamatan (semua desa) + data milik sendiri
+     * 5) user: punya kec & kel => hanya desa itu + data milik sendiri
+     * 6) user: kec & kel kosong => hanya data milik sendiri
      */
+    private function scopedSummaryQuery($auth, bool $isPriv): Builder
+    {
+        $q = UsulanSummary::query();
+
+        if ($isPriv) return $q;
+
+        $userId  = (string) $auth->id;
+        $userKec = strtolower(trim((string) ($auth->kecamatan ?? '')));
+        $userKel = strtolower(trim((string) ($auth->kelurahan ?? '')));
+
+        // Defensive: kalau kec kosong (walaupun kel ada), treat sebagai hanya miliknya
+        if ($userKec === '') {
+            return $q->where('user_id', $userId);
+        }
+
+        // 4) punya kec, kel kosong => seluruh kecamatan + miliknya
+        if ($userKel === '') {
+            return $q->where(function ($w) use ($userId, $userKec) {
+                $w->whereRaw('LOWER(kecamatan) = ?', [$userKec])
+                  ->orWhere('user_id', $userId);
+            });
+        }
+
+        // 5) punya kec & kel => hanya desa tsb + miliknya
+        return $q->where(function ($w) use ($userId, $userKec, $userKel) {
+            $w->where(function ($ww) use ($userKec, $userKel) {
+                $ww->whereRaw('LOWER(kecamatan) = ?', [$userKec])
+                   ->whereRaw("LOWER(COALESCE(kelurahan, '')) = ?", [$userKel]);
+            })->orWhere('user_id', $userId);
+        });
+    }
+
     private function sumKeys(array $counts, array $keys): int
     {
         $sum = 0;
-        foreach ($keys as $k) {
-            $sum += $counts[$k] ?? 0;
-        }
+        foreach ($keys as $k) $sum += $counts[$k] ?? 0;
         return $sum;
     }
 
-    /**
-     * Hitung distribusi status_verifikasi_usulan (0–7) untuk satu model.
-     * Return: array index 0..7 (raw counts)
-     */
-    private function countStatusForModel(string $modelClass): array
-    {
-        $result = array_fill(0, 8, 0);
-
-        if (!class_exists($modelClass)) {
-            return $result;
-        }
-
-        /** @var \Illuminate\Database\Eloquent\Model $model */
-        $model = new $modelClass();
-        $table = $model->getTable();
-
-        if (!Schema::hasColumn($table, 'status_verifikasi_usulan')) {
-            return $result;
-        }
-
-        $rows = $modelClass::query()
-            ->select('status_verifikasi_usulan', DB::raw('COUNT(*) as total'))
-            ->groupBy('status_verifikasi_usulan')
-            ->get();
-
-        foreach ($rows as $row) {
-            $s = (int) $row->status_verifikasi_usulan;
-            if ($s >= 0 && $s <= 7) {
-                $result[$s] = (int) $row->total;
-            }
-        }
-
-        return $result;
-    }
-
-    /**
-     * Bungkus array counts [0..7] → array of:
-     * [
-     *   ['status'=>0,'label'=>'Usulan','total'=>X],
-     *   ...
-     * ]
-     */
     private function wrapStatusCounts(array $counts): array
     {
         $out = [];
@@ -293,161 +445,5 @@ class DashboardController extends Controller
             ];
         }
         return $out;
-    }
-
-    /**
-     * Tentukan nama kolom kecamatan untuk suatu model.
-     *
-     * - Usulan PSU (BSL, usulan_fisik_perumahans, usulan_fisik_tpus, usulan_fisik_pjls)
-     *     → kecamatanUsulan (fallback: kecamatan)
-     * - TpuSerahTerima → kecamatanTPU / kecamatan_tpu / kecamatan
-     * - Lainnya        → kecamatan (jika ada)
-     */
-    private function resolveKecamatanColumn(string $modelClass): ?string
-    {
-        if (!class_exists($modelClass)) {
-            return null;
-        }
-
-        /** @var \Illuminate\Database\Eloquent\Model $model */
-        $model = new $modelClass();
-        $table = $model->getTable();
-
-        $usulanPsuModels = [
-            UsulanFisikBSL::class,
-            PSUUsulanFisikPerumahan::class,
-            PSUUsulanFisikTPU::class,
-            PSUUsulanFisikPJL::class,
-        ];
-
-        // Usulan PSU → kecamatanUsulan
-        if (in_array($modelClass, $usulanPsuModels, true)) {
-            if (Schema::hasColumn($table, 'kecamatanUsulan')) {
-                return 'kecamatanUsulan';
-            }
-            if (Schema::hasColumn($table, 'kecamatan')) {
-                return 'kecamatan';
-            }
-            return null;
-        }
-
-        // Serah Terima TPU
-        if ($modelClass === TpuSerahTerima::class) {
-            if (Schema::hasColumn($table, 'kecamatanTPU')) {
-                return 'kecamatanTPU';
-            }
-            if (Schema::hasColumn($table, 'kecamatan_tpu')) {
-                return 'kecamatan_tpu';
-            }
-            if (Schema::hasColumn($table, 'kecamatan')) {
-                return 'kecamatan';
-            }
-            return null;
-        }
-
-        // Default: kecamatan kalau ada
-        if (Schema::hasColumn($table, 'kecamatan')) {
-            return 'kecamatan';
-        }
-
-        return null;
-    }
-
-    /**
-     * Hitung jumlah per kecamatan untuk satu model.
-     * Return: array of ['kecamatan' => string, 'total' => int]
-     */
-    private function countByKecamatanForModel(string $modelClass): array
-    {
-        if (!class_exists($modelClass)) {
-            return [];
-        }
-
-        $kecColumn = $this->resolveKecamatanColumn($modelClass);
-        if (!$kecColumn) {
-            return [];
-        }
-
-        /** @var \Illuminate\Database\Eloquent\Model $model */
-        $model = new $modelClass();
-        $table = $model->getTable();
-
-        $rows = $modelClass::query()
-            ->select($kecColumn . ' as kecamatan', DB::raw('COUNT(*) as total'))
-            ->whereNotNull($kecColumn)
-            ->where($kecColumn, '!=', '')
-            ->groupBy($kecColumn)
-            ->orderBy($kecColumn)
-            ->get();
-
-        return $rows->map(function ($row) {
-            return [
-                'kecamatan' => (string) $row->kecamatan,
-                'total'     => (int) $row->total,
-            ];
-        })->toArray();
-    }
-
-    /**
-     * Hitung jumlah per kecamatan + per status (0–7) untuk satu model.
-     *
-     * Return: array of:
-     *   [
-     *     'kecamatan'  => 'Nama Kec',
-     *     'per_status' => [0 => n0, 1 => n1, ..., 7 => n7]
-     *   ]
-     */
-    private function countKecamatanStatusForModel(string $modelClass): array
-    {
-        if (!class_exists($modelClass)) {
-            return [];
-        }
-
-        $kecColumn = $this->resolveKecamatanColumn($modelClass);
-        if (!$kecColumn) {
-            return [];
-        }
-
-        /** @var \Illuminate\Database\Eloquent\Model $model */
-        $model = new $modelClass();
-        $table = $model->getTable();
-
-        if (!Schema::hasColumn($table, 'status_verifikasi_usulan')) {
-            return [];
-        }
-
-        $rows = $modelClass::query()
-            ->select(
-                $kecColumn . ' as kecamatan',
-                'status_verifikasi_usulan',
-                DB::raw('COUNT(*) as total')
-            )
-            ->whereNotNull($kecColumn)
-            ->where($kecColumn, '!=', '')
-            ->groupBy($kecColumn, 'status_verifikasi_usulan')
-            ->get();
-
-        $result = [];
-
-        foreach ($rows as $row) {
-            $kec = (string) $row->kecamatan;
-            $s   = (int) $row->status_verifikasi_usulan;
-            $cnt = (int) $row->total;
-
-            if ($kec === '' || $s < 0 || $s > 7) {
-                continue;
-            }
-
-            if (!isset($result[$kec])) {
-                $result[$kec] = [
-                    'kecamatan'  => $kec,
-                    'per_status' => array_fill(0, 8, 0),
-                ];
-            }
-
-            $result[$kec]['per_status'][$s] += $cnt;
-        }
-
-        return array_values($result);
     }
 }

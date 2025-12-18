@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class SAPDLahanMasyarakat extends Model
 {
@@ -17,17 +18,14 @@ class SAPDLahanMasyarakat extends Model
     protected $fillable = [
         'uuid',
 
-        // Sumber & pengusul (sesuai FormData)
         'sumberUsulan',
         'namaAspirator',
         'noKontakAspirator',
 
-        // Data lahan
         'namaPemilikLahan',
         'ukuranLahan',
         'statusLegalitasTanah',
 
-        // Alamat
         'alamatDusun',
         'alamatRT',
         'alamatRW',
@@ -37,7 +35,6 @@ class SAPDLahanMasyarakat extends Model
 
         'user_id',
 
-        // arrays (JSON)
         'buktiLegalitasTanah',
         'fotoLahan',
 
@@ -54,8 +51,13 @@ class SAPDLahanMasyarakat extends Model
         'updated_at'               => 'datetime',
         'status_verifikasi_usulan' => 'integer',
 
-        // JSON casts
         'buktiLegalitasTanah'      => 'array',
         'fotoLahan'                => 'array',
     ];
+
+    // ✅ relasi ke users untuk ambil users.name
+    public function user(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'user_id');
+    }
 }

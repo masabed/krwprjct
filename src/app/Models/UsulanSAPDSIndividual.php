@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class UsulanSAPDSIndividual extends Model
 {
@@ -19,12 +20,10 @@ class UsulanSAPDSIndividual extends Model
         'uuid',
         'user_id',
 
-        // Sumber & pengusul
         'sumberUsulan',
         'namaAspirator',
         'noKontakAspirator',
 
-        // Data calon penerima
         'namaCalonPenerima',
         'nikCalonPenerima',
         'noKKCalonPenerima',
@@ -37,7 +36,6 @@ class UsulanSAPDSIndividual extends Model
         'ketersedianSumber',
         'titikLokasi',
 
-        // File arrays
         'fotoLahan',
         'fotoRumah',
 
@@ -56,4 +54,12 @@ class UsulanSAPDSIndividual extends Model
         'fotoLahan'                => 'array',
         'fotoRumah'                => 'array',
     ];
+
+    // ✅ relasi ke users untuk ambil users.name
+    public function user(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'user_id');
+        // kalau user_id nyimpan uuid user, pakai ini:
+        // return $this->belongsTo(User::class, 'user_id', 'uuid');
+    }
 }

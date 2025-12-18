@@ -1,0 +1,163 @@
+<?php
+
+namespace App\Console\Commands;
+
+use Illuminate\Console\Command;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
+use Illuminate\Database\Eloquent\SoftDeletes;
+
+use App\Models\UsulanSummary;
+use App\Observers\UsulanSummaryObserver;
+
+// usulan
+use App\Models\UsulanFisikBSL;
+use App\Models\PSUUsulanFisikPerumahan;
+use App\Models\PSUUsulanFisikTPU;
+use App\Models\PSUUsulanFisikPJL;
+
+use App\Models\SAPDLahanMasyarakat;
+use App\Models\UsulanSAPDSIndividual;
+use App\Models\UsulanSAPDSFasilitasUmum;
+
+use App\Models\Permukiman;
+use App\Models\Rutilahu;
+
+// serah terima
+use App\Models\PsuSerahTerima;
+use App\Models\TpuSerahTerima;
+
+class RebuildUsulanSummaries extends Command
+{
+    protected $signature = 'summary:rebuild
+                            {--fresh : Truncate usulan_summaries dulu sebelum rebuild}
+                            {--with-trashed : Ikutkan data soft-deleted (kalau model pakai SoftDeletes)}
+                            {--chunk=500 : Ukuran batch upsert}';
+
+    protected $description = 'Rebuild tabel usulan_summaries dari semua model sumber';
+
+    public function handle(): int
+    {
+        DB::disableQueryLog();
+
+        $table = (new UsulanSummary)->getTable();
+        $chunkSize = max(50, (int) $this->option('chunk'));
+
+        // ambil kolom asli supaya upsert aman (ga error kalau ada kolom yang ternyata gak ada)
+        $columns = Schema::getColumnListing($table);
+        $colSet  = array_flip($columns);
+
+        // pastikan unique key tersedia
+        foreach (['form', 'uuid_usulan'] as $must) {
+            if (!isset($colSet[$must])) {
+                $this->error("Kolom wajib '{$must}' tidak ada di tabel {$table}.");
+                return self::FAILURE;
+            }
+        }
+
+        $hasCreated = isset($colSet['created_at']);
+        $hasUpdated = isset($colSet['updated_at']);
+
+        if ($this->option('fresh')) {
+            $this->warn("Truncating {$table} ...");
+            // aman untuk kasus ada FK
+            DB::statement('SET FOREIGN_KEY_CHECKS=0');
+            DB::table($table)->truncate();
+            DB::statement('SET FOREIGN_KEY_CHECKS=1');
+        }
+
+        $models = [
+            UsulanFisikBSL::class,
+            PSUUsulanFisikPerumahan::class,
+            PSUUsulanFisikTPU::class,
+            PSUUsulanFisikPJL::class,
+
+            SAPDLahanMasyarakat::class,
+            UsulanSAPDSIndividual::class,
+            UsulanSAPDSFasilitasUmum::class,
+
+            Permukiman::class,
+            Rutilahu::class,
+
+            PsuSerahTerima::class,
+            TpuSerahTerima::class,
+        ];
+
+        $uniqueBy = ['form', 'uuid_usulan'];
+
+        // kolom update (difilter hanya yang ada di tabel)
+        $updateColumns = [
+            'user_id',
+            'user_kecamatan',
+            'user_kelurahan',
+            'status_verifikasi_usulan',
+            'kecamatan',
+            'kelurahan',
+            'titik_lokasi',
+        ];
+
+        $updateColumns = array_values(array_filter($updateColumns, fn ($c) => isset($colSet[$c])));
+        if ($hasUpdated) $updateColumns[] = 'updated_at';
+
+        $totalUpserted = 0;
+
+        foreach ($models as $modelClass) {
+            $this->info("Rebuilding from: {$modelClass}");
+
+            $query = $modelClass::query();
+
+            if ($this->option('with-trashed') && $this->usesSoftDeletes($modelClass)) {
+                $query = $query->withTrashed();
+            }
+
+            $buffer = [];
+
+            foreach ($query->cursor() as $row) {
+                $payload = UsulanSummaryObserver::buildPayload($row);
+                if (!$payload) continue;
+
+                $now = now();
+
+                if ($hasCreated && empty($payload['created_at'])) {
+                    $payload['created_at'] = $now;
+                }
+                if ($hasUpdated) {
+                    $payload['updated_at'] = $now;
+                }
+
+                // filter payload ke kolom yang benar-benar ada
+                $payload = array_intersect_key($payload, $colSet);
+
+                // pastikan key wajib ada
+                if (empty($payload['form']) || empty($payload['uuid_usulan'])) {
+                    continue;
+                }
+
+                $buffer[] = $payload;
+
+                if (count($buffer) >= $chunkSize) {
+                    $totalUpserted += $this->flushUpsert($table, $buffer, $uniqueBy, $updateColumns);
+                    $buffer = [];
+                }
+            }
+
+            if (!empty($buffer)) {
+                $totalUpserted += $this->flushUpsert($table, $buffer, $uniqueBy, $updateColumns);
+            }
+        }
+
+        $this->info("DONE. Total upsert rows processed: {$totalUpserted}");
+        return self::SUCCESS;
+    }
+
+    private function flushUpsert(string $table, array $rows, array $uniqueBy, array $updateColumns): int
+    {
+        DB::table($table)->upsert($rows, $uniqueBy, $updateColumns);
+        return count($rows);
+    }
+
+    private function usesSoftDeletes(string $modelClass): bool
+    {
+        return in_array(SoftDeletes::class, class_uses_recursive($modelClass), true);
+    }
+}
